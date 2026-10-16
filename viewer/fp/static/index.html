@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="cs" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTCUSDT Footprint</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="toolbar">
+  <span class="brand">BTCUSDT perp</span>
+  <label>Agregace
+    <select id="agg"></select>
+  </label>
+  <span id="custom-wrap" hidden>
+    <input id="custom-value" type="number" min="1" step="any" placeholder="práh">
+    <select id="custom-unit"><option value="usd">USD</option><option value="btc">BTC</option></select>
+    <button id="custom-go">OK</button>
+  </span>
+  <label>Bin
+    <select id="bin"></select>
+  </label>
+  <label>Buňka
+    <select id="mode">
+      <option value="delta">delta</option>
+      <option value="sellbuy">sell × buy</option>
+      <option value="volume">volume</option>
+    </select>
+  </label>
+  <label>Od <input id="range-from" type="date"></label>
+  <label>Do <input id="range-to" type="date"></label>
+  <button id="range-go" title="Načíst celý rozsah (dny v zobrazeném časovém pásmu) a zobrazit ho celý">Načíst</button>
+  <button id="range-all" title="Načíst celý dostupný dataset">Vše</button>
+  <span class="pop-wrap">
+    <button id="layers-btn" title="Sessions a dny: pásy, high/low, volume a delta profil">Vrstvy ▾</button>
+    <div id="layers-pop" class="pop" hidden>
+      <div class="pop-h">Sessions <span id="sess-def" class="muted small"></span></div>
+      <label class="chk"><input type="checkbox" data-layer="sess"> pásy sessions</label>
+      <label class="chk"><input type="checkbox" data-layer="sessHL"> high / low</label>
+      <label class="chk"><input type="checkbox" data-layer="sessVP"> volume profil</label>
+      <label class="chk"><input type="checkbox" data-layer="sessDP"> delta profil</label>
+      <div class="pop-h">Dny <span id="day-def" class="muted small"></span></div>
+      <label class="chk"><input type="checkbox" data-layer="dayHL"> high / low</label>
+      <label class="chk"><input type="checkbox" data-layer="dayVP"> volume profil</label>
+      <label class="chk"><input type="checkbox" data-layer="dayDP"> delta profil</label>
+      <div class="muted small">Profily v aktuálním binu; volume profil od začátku období, delta profil u jeho konce.</div>
+    </div>
+  </span>
+  <button id="profile-btn" class="toggle" title="Volume profile každé svíčky (On/Off)">Profil</button>
+  <button id="dprofile-btn" class="toggle violet" title="Delta profile každé svíčky (On/Off)">Δ Profil</button>
+  <span class="seg" id="tz-seg">
+    <button data-tz="America/New_York" class="on">NY</button><button data-tz="UTC">UTC</button>
+  </span>
+  <span class="seg" id="oi-seg" title="Jednotky ΔOI">
+    <button data-oi="btc" class="on">ΔOI BTC</button><button data-oi="usd">USD</button>
+  </span>
+  <button id="theme-btn" title="Přepnout tmavý / světlý režim">☀ Světlý</button>
+  <span id="status"></span>
+</header>
+<main>
+  <div id="chart-wrap">
+    <canvas id="chart"></canvas>
+    <div id="tooltip" hidden></div>
+    <div id="help">kolečko = zoom čas · Ctrl/Shift + kolečko = zoom cena · tažení osy = škálování (cenová ↕, časová ↔) · tažení = posun · dvojklik = reset (na ose jen té osy) · klik = detail svíčky</div>
+  </div>
+  <aside id="side">
+    <section>
+      <h2>Detektor</h2>
+      <div class="grid2">
+        <label>N <input id="det-n" type="number" min="5" max="500" step="1"></label>
+        <label title="jen objemové svíčky: V1 = rychlost posledních W svíček">okno W <input id="det-w" type="number" min="2" max="200" step="1"></label>
+        <label>práh z <input id="det-z" type="number" step="0.1"></label>
+        <label>V2 ≥ <input id="det-v2" type="number" min="0" max="1" step="0.05"></label>
+        <label>D2 ≥ <input id="det-d2" type="number" min="0" max="1" step="0.05"></label>
+        <span></span>
+        <label class="chk"><input id="det-long" type="checkbox"> long</label>
+        <label class="chk"><input id="det-short" type="checkbox"> short</label>
+      </div>
+      <div class="sub">Podmínky signálu</div>
+      <div id="det-conds" class="conds"></div>
+      <div class="row2"><label>Min. splněných <input id="det-min" type="number" min="1" step="1"> <span id="det-min-of"></span></label></div>
+      <div class="row2"><label title="velikost bucketu pro volume / delta POC v podmínkách P1, P2">POC bin <select id="det-pocbin"></select></label></div>
+      <div id="det-count" class="muted"></div>
+      <button id="export">Export signálů (CSV)</button>
+      <div id="det-note" class="muted small"></div>
+    </section>
+    <section id="detail">
+      <h2>Svíčka</h2>
+      <div id="detail-body" class="muted">Klikni na svíčku.</div>
+    </section>
+  </aside>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

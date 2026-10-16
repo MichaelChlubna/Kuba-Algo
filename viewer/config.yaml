@@ -1,0 +1,55 @@
+symbol: BTCUSDT
+
+paths:
+  # relative to this folder (viewer/); data live in the shared top-level data/ folder
+  raw: ../data/raw         # downloaded zips (mirror of data.binance.vision layout)
+  parquet: ../data/parquet # per-day parquet converted from raw CSV
+  derived: ../data/derived # candles, footprint, features
+
+download:
+  base_url: https://data.binance.vision
+  start: 2026-01-01
+  end: 2026-10-08
+  datasets: [aggTrades, metrics, klines_1m, klines_5m]
+  workers: 4
+  retries: 3
+
+aggregation:
+  timeframes: [1m, 5m, 15m]
+  volume_usd: [100000000]      # volume candle thresholds in USD notional
+  volume_btc: [1000]           # volume candle thresholds in BTC
+  base_bin: 5                  # footprint base bin in USD
+  cvd_reset: daily             # none | daily
+  cvd_reset_timezone: UTC      # timezone of the daily CVD reset (00:00), e.g. UTC or America/New_York
+
+detector:
+  n: 30
+  vol_window: 10               # volume candles: V1 = speed of the last W candles vs N earlier W-windows
+  z_min: 2.0
+  v2_min: 0.5
+  d2_min: 0.5
+  long: true
+  short: true
+  conditions: [V1, V2, D1, D2]  # enabled conditions (V1 V2 D1 D2 P1 P2); P1/P2 = volume / delta POC in the wick
+  min_true: null               # how many of the enabled must hold (null = all)
+  poc_bin: 25                  # bucket size (USD) for volume / delta POC in P1, P2: 5 10 25 50 100
+  tod_days: 20                 # time-of-day relative volume lookback (days)
+  tod_timezone: America/New_York  # 'same time of day' is local time here (follows DST)
+
+metrics:                       # intra-candle order-flow metrics (see README "Metodika")
+  imbalance_ratio: 3.0         # diagonal imbalance: aggressive side >= ratio x opposite side one level away
+  imbalance_min_usd: 50000     # ... and the aggressive side has at least this much (USD) at the level
+  stack_min: 3                 # stacked imbalance = at least this many consecutive levels
+  big_trade_btc: 5             # large trade = aggTrade of at least this size (BTC)
+
+sessions:                      # viewer layers; times in `timezone` (DST-aware), end exclusive, may wrap midnight
+  timezone: America/New_York   # (a wrapping session belongs to the day on which it ends)
+  list:
+    - {name: Asia, start: "18:00", end: "03:00"}
+    - {name: London, start: "03:00", end: "08:00"}
+    - {name: New York, start: "08:00", end: "17:00"}
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  timezone: America/New_York   # display timezone (UI can switch to UTC); DST handled via IANA tz

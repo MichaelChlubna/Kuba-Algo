@@ -1,0 +1,9 @@
+# data (~40 GB, regenerated via start.bat -> 2)
+/data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
