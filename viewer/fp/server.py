@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import datetime as dt
-import io
 import logging
 import threading
 from functools import lru_cache
 from pathlib import Path
 
 import polars as pl
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -27,7 +26,7 @@ MAX_CANDLES = 20_000      # per request, full columns
 MAX_LIGHT_CANDLES = 250_000  # per request, light columns (range loading)
 MAX_FP_ROWS = 400_000     # per request
 
-# candle columns sent to the browser (detector conditions are recomputed client-side)
+# candle columns sent to the browser (full detail)
 CANDLE_COLS = [
     "cid", "start_ts", "end_ts", "first_ts", "last_ts", "duration_ms", "open", "high", "low", "close",
     "volume", "buy", "sell", "volume_usd", "buy_usd", "sell_usd", "delta", "delta_usd", "cvd", "cvd_usd",
@@ -38,18 +37,15 @@ CANDLE_COLS = [
     "uw_share", "uw_range", "uw_conc", "uw_delta_usd", "uw_delta_ratio", "uw_buy_share", "z", "vspeed",
 ] + [f"{k}_{b}" for b in (5, 10, 25, 50, 100) for k in ("vpoc", "dpoc_neg", "dpoc_pos")] + METRIC_COLS
 POC_COLS = [f"{k}_{b}" for b in (5, 10, 25, 50, 100) for k in ("vpoc", "dpoc_neg", "dpoc_pos")]
-# light columns: everything the chart, table, tooltip and the client-side detector need; the rest
-# (metrics, wick components) is fetched per candle on click (/api/candle) and joined server-side on export
+# light columns: everything the chart, table, tooltip and the selected-candle POC markers need; the rest
+# (features, metrics, wick components) is fetched per candle on click (/api/candle)
 LIGHT_COLS = [
     "cid", "start_ts", "end_ts", "last_ts", "duration_ms", "open", "high", "low", "close",
-    "volume", "volume_usd", "delta", "delta_usd", "cvd_usd", "trades", "d_oi", "d_oi_usd", "valid",
-    "lw_vol_usd", "lw_share", "lw_delta_usd", "lw_sell_share", "uw_vol_usd", "uw_share", "uw_delta_usd", "uw_buy_share",
-    "z", "vspeed",
+    "volume", "volume_usd", "delta", "delta_usd", "cvd_usd", "trades", "d_oi", "d_oi_usd",
 ] + POC_COLS
-_ROUND = {0: ("volume_usd", "delta_usd", "cvd_usd", "lw_vol_usd", "lw_delta_usd", "uw_vol_usd", "uw_delta_usd", "d_oi_usd"),
+_ROUND = {0: ("volume_usd", "delta_usd", "cvd_usd", "d_oi_usd"),
           1: ("open", "high", "low", "close"),
-          3: ("volume", "delta", "d_oi"),
-          5: ("lw_share", "lw_sell_share", "uw_share", "uw_buy_share", "z", "vspeed")}
+          3: ("volume", "delta", "d_oi")}
 FP_COLS = ["cid", "start_ts", "level", "buy_usd", "sell_usd", "buy", "sell"]
 
 
@@ -122,7 +118,7 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/meta")
     def meta():
-        out = {"aggregations": {}, "detector": cfg["detector"], "timezone": cfg["server"].get("timezone", "America/New_York"),
+        out = {"aggregations": {}, "features": cfg.get("features") or {}, "timezone": cfg["server"].get("timezone", "America/New_York"),
                "base_bin": cfg["aggregation"]["base_bin"], "bins": [5, 10, 25, 50, 100], "default_bin": 25,
                "volume_usd": cfg["aggregation"].get("volume_usd", []), "volume_btc": cfg["aggregation"].get("volume_btc", []),
                "metrics": {**METRIC_DEFAULTS, **(cfg.get("metrics") or {})}, "metric_cols": METRIC_COLS,
@@ -177,22 +173,6 @@ def create_app(cfg: dict) -> FastAPI:
             raise HTTPException(404, "candle not found")
         return JSONResponse(_columnar(df))
 
-    @app.post("/api/export")
-    def export(payload: dict = Body(...)):
-        """CSV of signals with all features: payload {agg, rows: [{cid, start_ts, side, ...detector cols}]}."""
-        agg = payload["agg"]
-        check_agg(agg)
-        rows = payload.get("rows") or []
-        if not rows:
-            return Response("", media_type="text/csv")
-        sig = pl.DataFrame(rows)
-        start, end = int(sig["start_ts"].min()), int(sig["start_ts"].max()) + 1
-        full = load_range(agg, start, end).drop([c for c in ("start_ts",) if c in sig.columns])
-        out = sig.join(full, on="cid", how="left").sort("cid", "side")
-        buf = io.StringIO()
-        out.write_csv(buf)
-        return Response(buf.getvalue(), media_type="text/csv")
-
     @app.post("/api/volume")
     def volume(unit: str, value: float):
         """Build (and cache on disk) volume candles for a custom threshold in the background."""
@@ -216,7 +196,7 @@ def create_app(cfg: dict) -> FastAPI:
 
     @app.get("/api/candles")
     def candles(agg: str, start: int, end: int, pad: int = Query(0, ge=0, le=2000), full: bool = False):
-        """Candles with start_ts in [start, end) plus `pad` candles before `start` (rolling z-score warm-up).
+        """Candles with start_ts in [start, end) plus `pad` candles before `start`.
 
         Default: light columns (LIGHT_COLS, rounded) for range loading; full=1: all viewer columns."""
         check_agg(agg)

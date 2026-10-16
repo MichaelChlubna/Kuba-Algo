@@ -1,4 +1,4 @@
-"""Per-candle detector features (absorption in wicks), OI delta and rolling statistics."""
+"""Per-candle features (wick volume components), OI delta and rolling statistics."""
 from __future__ import annotations
 
 import polars as pl
@@ -45,7 +45,7 @@ def static_features(df: pl.DataFrame) -> pl.DataFrame:
     lo_body = pl.min_horizontal("open", "close")
     hi_body = pl.max_horizontal("open", "close")
     return df.with_columns(
-        valid=rng > 0,  # H == L candles are skipped by the detector
+        valid=rng > 0,  # H == L candles have no range
         color=pl.when(pl.col("close") > pl.col("open")).then(1).when(pl.col("close") < pl.col("open")).then(-1).otherwise(0).cast(pl.Int8),
         close_pos=_ratio(pl.col("close") - pl.col("low"), rng),
         delta_ratio=_ratio(pl.col("delta_usd"), pl.col("volume_usd")),
@@ -84,7 +84,7 @@ def window_speed(w: int) -> pl.Expr:
 
 
 def add_rolling(df: pl.DataFrame, n: int, volume_bars: bool = False, window: int = 10) -> pl.DataFrame:
-    """V1 statistic.
+    """Rolling volume z-score `z`.
 
     Time candles: z of ln(volume_usd) vs the n previous candles.
     Volume candles (experimental): speed of the last `window` candles, z of -ln(span_window) vs the n
@@ -126,51 +126,3 @@ def add_oi_delta(df: pl.DataFrame, oi: pl.DataFrame) -> pl.DataFrame:
         d_oi_usd=pl.when(has).then(pl.col("_eu") - pl.col("_su")),
         oi_end=pl.col("_eb"),
     ).sort("_i").drop("_i", "_sb", "_su", "_sst", "_eb", "_eu", "_est")
-
-
-ALL_CONDITIONS = ("V1", "V2", "D1", "D2", "P1", "P2")
-DEFAULT_CONDITIONS = ("V1", "V2", "D1", "D2")
-
-
-def detect(df: pl.DataFrame, z_min: float, v2_min: float, d2_min: float, long: bool = True, short: bool = True,
-           conditions=DEFAULT_CONDITIONS, min_true: int | None = None, poc_bin: int = 25) -> pl.DataFrame:
-    """Evaluate all conditions for both sides; a signal needs >= min_true of the enabled `conditions`.
-
-    V1 volume z-score, V2 wick volume share, D1 wick delta sign, D2 wick share of sell (buy) volume,
-    P1 volume POC bucket lies entirely in the wick, P2 delta POC bucket lies entirely in the wick
-    (long: delta POC = most negative delta level, below min(O,C); short: most positive delta level, above
-    max(O,C)). Unsatisfiable on null (zero wick, missing POC, ...).
-    min_true None = all enabled conditions.
-    """
-    v = pl.col("valid")
-    v1 = (pl.col("z") >= z_min).fill_null(False)
-    b = poc_bin
-    has_poc = f"vpoc_{b}" in df.columns
-    vpoc, dneg, dpos = pl.col(f"vpoc_{b}"), pl.col(f"dpoc_neg_{b}"), pl.col(f"dpoc_pos_{b}")
-    false = pl.lit(False)
-    out = df.with_columns(
-        L_V1=v1,
-        L_V2=(pl.col("lw_share") >= v2_min).fill_null(False) & (pl.col("lw_vol_usd") > 0),
-        L_D1=(pl.col("lw_delta_usd") < 0).fill_null(False),
-        L_D2=(pl.col("lw_sell_share") >= d2_min).fill_null(False),
-        # bucket [vpoc, vpoc + b) entirely below min(O, C)
-        L_P1=((vpoc + b) <= pl.min_horizontal("open", "close")).fill_null(False) if has_poc else false,
-        L_P2=((dneg + b) <= pl.min_horizontal("open", "close")).fill_null(False) if has_poc else false,
-        S_V1=v1,
-        S_V2=(pl.col("uw_share") >= v2_min).fill_null(False) & (pl.col("uw_vol_usd") > 0),
-        S_D1=(pl.col("uw_delta_usd") > 0).fill_null(False),
-        S_D2=(pl.col("uw_buy_share") >= d2_min).fill_null(False),
-        # bucket entirely above max(O, C)
-        S_P1=(vpoc > pl.max_horizontal("open", "close")).fill_null(False) if has_poc else false,
-        S_P2=(dpos > pl.max_horizontal("open", "close")).fill_null(False) if has_poc else false,
-    )
-    conds = [c for c in ALL_CONDITIONS if c in set(conditions)]
-    k = len(conds) if min_true is None else max(1, min(int(min_true), len(conds)))
-
-    def sig(side: str, enabled: bool) -> pl.Expr:
-        if not conds:
-            return pl.lit(False)
-        n = pl.sum_horizontal([pl.col(f"{side}_{c}").cast(pl.Int8) for c in conds])
-        return pl.lit(enabled) & v & (n >= k)
-
-    return out.with_columns(long_signal=sig("L", long), short_signal=sig("S", short))

@@ -1,4 +1,4 @@
-"""Intra-candle order-flow metrics (absorption context), stored per candle next to the detector features.
+"""Intra-candle order-flow metrics (absorption context), stored per candle next to the candle features.
 
 Trade-based metrics use individual aggTrades (or volume-candle pieces); footprint-based metrics use the
 base-bin footprint (default 5 USD). All USD values are notional. See README "Metodika".

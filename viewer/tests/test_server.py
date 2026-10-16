@@ -23,7 +23,7 @@ def make_cfg(tmp_path):
         p = derived / "footprint" / "5m" / f"{day}.parquet"
         p.parent.mkdir(parents=True, exist_ok=True)
         fp.write_parquet(p)
-    return {"paths": {"derived": derived}, "detector": {"n": 30}, "server": {"timezone": "America/New_York"},
+    return {"paths": {"derived": derived}, "server": {"timezone": "America/New_York"},
             "aggregation": {"base_bin": 5}}
 
 
@@ -33,7 +33,7 @@ def test_meta_candles_pad_and_footprint(tmp_path):
     assert meta["aggregations"]["5m"] == {"first_day": "2026-10-07", "last_day": "2026-10-08", "candles": 576, "per_day": 288.0}
     assert meta["timezone"] == "America/New_York"
 
-    r = c.get("/api/candles", params={"agg": "5m", "start": D0 + DAY, "end": D0 + DAY + 3_600_000, "pad": 30}).json()
+    r = c.get("/api/candles", params={"agg": "5m", "start": D0 + DAY, "end": D0 + DAY + 3_600_000, "pad": 30, "full": 1}).json()
     ts = r["cols"]["start_ts"]
     assert r["n"] == 12 + 30 and ts[0] == D0 + DAY - 30 * 300_000 and ts[-1] == D0 + DAY + 11 * 300_000
     assert r["cols"]["z"][0] is None  # NaN -> null in JSON
@@ -45,7 +45,7 @@ def test_meta_candles_pad_and_footprint(tmp_path):
     assert c.get("/").status_code == 200
 
 
-def test_light_full_detail_and_export(tmp_path):
+def test_light_full_and_detail(tmp_path):
     c = TestClient(create_app(make_cfg(tmp_path)))
     light = c.get("/api/candles", params={"agg": "5m", "start": D0, "end": D0 + 2 * DAY}).json()
     full = c.get("/api/candles", params={"agg": "5m", "start": D0, "end": D0 + DAY, "full": 1}).json()
@@ -53,7 +53,3 @@ def test_light_full_detail_and_export(tmp_path):
     assert set(light["cols"]) <= set(full["cols"]) | {"cid"}
     one = c.get("/api/candle", params={"agg": "5m", "cid": D0 + 300_000, "start_ts": D0 + 300_000}).json()
     assert one["n"] == 1 and one["cols"]["start_ts"] == [D0 + 300_000]
-    csv = c.post("/api/export", json={"agg": "5m", "rows": [{"cid": D0 + DAY, "start_ts": D0 + DAY, "side": "long"}]}).text
-    head, row = csv.strip().splitlines()
-    assert head.startswith("cid,start_ts,side") and "volume_usd" in head
-    assert row.split(",")[0] == str(D0 + DAY)

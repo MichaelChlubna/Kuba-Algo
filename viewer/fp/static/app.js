@@ -38,14 +38,12 @@ const S = {
   meta: null, agg: '5m', bin: 25, mode: 'delta', tz: 'America/New_York', oiUnit: 'btc',
   colW: DEFAULT_COLW, rightIdx: 0, priceTop: 0, ppu: 1, autoY: true, selected: -1, hover: null, profile: false, dprofile: false,
   layers: { sess: false, sessHL: false, sessVP: false, sessDP: false, dayHL: false, dayVP: false, dayDP: false },
-  det: { n: 30, w: 10, z: 2, v2: 0.5, d2: 0.5, long: true, short: true, minTrue: null, pocBin: 25,
-         cond: { V1: true, V2: true, D1: true, D2: true, P1: false, P2: false } },
 };
 const stores = new Map();
 
 function newStore() {
   return { candles: [], minDay: null, maxDay: null, inflight: new Map(),
-           fp: new Map(), fpByDay: new Map(), fpInflight: new Set(), signals: { long: 0, short: 0 } };
+           fp: new Map(), fpByDay: new Map(), fpInflight: new Set() };
 }
 function store() {
   let st = stores.get(S.agg);
@@ -148,9 +146,8 @@ function loadDay(dn, st = store(), agg = S.agg) {
         if (current) { S.rightIdx += rows.length; if (S.selected >= 0) S.selected += rows.length; }
       } else if (dn === st.maxDay + 1) { st.candles = st.candles.concat(rows); st.maxDay = dn; }
       else return;
-      recompute(st);
       if (current) { draw(); updateSide(); }
-    } catch (e) { status('Chyba načítání: ' + e.message); throw e; }
+    } catch (e) { status(t('err_load') + e.message); throw e; }
     finally { st.inflight.delete(dn); if (stores.get(S.agg) === st) setTimeout(ensure, 0); }
   })();
   st.inflight.set(dn, p);
@@ -173,7 +170,7 @@ async function loadFp(dn, st = store(), agg = S.agg) {
     }
     st.fpByDay.set(dn, list);
     if (stores.get(S.agg) === st) draw();
-  } catch (e) { status('Chyba footprintu: ' + e.message); }
+  } catch (e) { status(t('err_fp') + e.message); }
   finally { st.fpInflight.delete(dn); }
 }
 
@@ -184,8 +181,7 @@ function ensure() {
   const [l, r] = visRange();
   const n = st.candles.length;
   if (st.inflight.size === 0) {
-    const hist = S.det.n + (isVolumeAgg(S.agg) ? 2 * S.det.w : 0) + 20;   // rolling warm-up kept on the left
-    if (l < hist && st.minDay > first) loadDay(st.minDay - 1, st).catch(() => {});
+    if (l < 20 && st.minDay > first) loadDay(st.minDay - 1, st).catch(() => {});
     else if (r > n - 20 && st.maxDay < last) loadDay(st.maxDay + 1, st).catch(() => {});
   }
   if (showCells() && n) {
@@ -238,7 +234,7 @@ async function loadPeriods(b, key) {
     for (const [id, p] of byId) PER.map.set(id, p);
     PER.blocks.add(b);
     draw();
-  } catch (e) { status('Chyba sessions/dnů: ' + e.message); }
+  } catch (e) { status(t('err_periods') + e.message); }
   finally { PER.inflight.delete(b); setTimeout(ensurePeriods, 0); }
 }
 
@@ -346,60 +342,6 @@ function fpFor(c, bin) {
   return r;
 }
 
-// ---------------------------------------------------------------- detector (recomputed in the browser)
-const CONDS = ['V1', 'V2', 'D1', 'D2', 'P1', 'P2'];
-function requiredCount() {   // minTrue null = all enabled conditions
-  const m = CONDS.filter((cn) => S.det.cond[cn]).length;
-  return S.det.minTrue === null ? m : clamp(S.det.minTrue, 1, Math.max(1, m));
-}
-function recompute(st) {
-  const c = st.candles, n = c.length, N = S.det.n, vol = isVolumeAgg(S.agg), d = S.det;
-  // V1 input x: time candles ln(Vol_USD); volume candles -ln(time to complete the last W candles)
-  const W = vol ? d.w : 1, first = vol ? W : 0;   // first index with a defined x
-  const ps = new Float64Array(n + 1), ps2 = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) {
-    const x = !vol ? Math.log(c[i].volume_usd)
-      : (i >= W ? -Math.log(Math.max(1, c[i].end_ts - c[i - W].end_ts)) : 0);
-    c[i]._x = i >= first ? x : null;
-    ps[i + 1] = ps[i] + x; ps2[i + 1] = ps2[i] + x * x;
-  }
-  let nl = 0, ns = 0;
-  const enabledConds = CONDS.filter((cn) => d.cond[cn]);
-  const need = requiredCount();
-  for (let i = 0; i < n; i++) {
-    const k = c[i];
-    let z = null;
-    // baseline: N values ending W rows back (time candles W=1: the N previous; volume candles: N windows
-    // that ended before the current window started), sample std (ddof=1)
-    const e = i - W + 1, b = e - N;   // baseline = x[b .. e-1]
-    if (b >= first) {
-      const s1 = ps[e] - ps[b], s2 = ps2[e] - ps2[b], mean = s1 / N;
-      const v = (s2 - N * mean * mean) / (N - 1), sd = Math.sqrt(Math.max(v, 0));
-      if (sd > 0) z = (k._x - mean) / sd;
-    }
-    const v1 = z !== null && z >= d.z;
-    const L = { V1: v1, V2: k.lw_vol_usd > 0 && k.lw_share >= d.v2, D1: k.lw_delta_usd < 0,
-                D2: k.lw_sell_share !== null && k.lw_sell_share >= d.d2 };
-    const Sh = { V1: v1, V2: k.uw_vol_usd > 0 && k.uw_share >= d.v2, D1: k.uw_delta_usd > 0,
-                 D2: k.uw_buy_share !== null && k.uw_buy_share >= d.d2 };
-    // P1: volume POC bucket entirely in the wick; P2: side-specific delta POC bucket entirely in the wick
-    const pb = d.pocBin, vp = k[`vpoc_${pb}`], dn = k[`dpoc_neg_${pb}`], dp = k[`dpoc_pos_${pb}`];
-    const has = (x) => x !== null && x !== undefined;
-    L.P1 = has(vp) && vp + pb <= Math.min(k.open, k.close);
-    L.P2 = has(dn) && dn + pb <= Math.min(k.open, k.close);
-    Sh.P1 = has(vp) && vp > Math.max(k.open, k.close);
-    Sh.P2 = has(dp) && dp > Math.max(k.open, k.close);
-    const passed = (o) => enabledConds.reduce((a, cn) => a + (o[cn] ? 1 : 0), 0);
-    L.n = passed(L); Sh.n = passed(Sh);
-    L.sig = d.long && k.valid && enabledConds.length > 0 && L.n >= need;
-    Sh.sig = d.short && k.valid && enabledConds.length > 0 && Sh.n >= need;
-    k.det = { z, L, S: Sh };
-    if (L.sig) nl++;
-    if (Sh.sig) ns++;
-  }
-  st.signals = { long: nl, short: ns };
-}
-
 // ---------------------------------------------------------------- geometry
 const canvas = $('chart'), ctx = canvas.getContext('2d');
 const G = { W: 0, H: 0, plotW: 0, AX: 76, mainH: 0, tableTop: 0, oiTop: 0, oiH: 0, timeTop: 0, ROW: 16, TROWS: 5, TIME: 20 };
@@ -457,7 +399,7 @@ function render() {
   layout();
   const st = store(), cs = st.candles, n = cs.length;
   ctx.fillStyle = C.bg; ctx.fillRect(0, 0, G.W, G.H);
-  if (!n) { ctx.fillStyle = C.dim; ctx.font = `13px ${MONO}`; ctx.fillText('Načítám…', 20, 40); return; }
+  if (!n) { ctx.fillStyle = C.dim; ctx.font = `13px ${MONO}`; ctx.fillText(t('loading'), 20, 40); return; }
   if (S.autoY) autoFitY();
   const [l, r] = visRange();
   const cells = showCells(), text = showText();
@@ -481,7 +423,6 @@ function render() {
   drawSessionBands();
   if (cells) drawCells(cs, l, r, text); else drawCandlesWide(cs, l, r);
   drawPeriodOverlays();
-  drawMarkers(cs, l, r);
   drawSelection(cs);
   drawPocMarkers(cs);
   ctx.restore();
@@ -619,7 +560,7 @@ function drawDeltaProfile(f, cx0, cw, bin) {
   for (let k = 0; k < n; k++) { const d = f.b[k] - f.s[k]; dl.set(f.lv[k], d); m = Math.max(m, Math.abs(d)); }
   if (!m) return;
   const mid = cx0 + cw / 2, half = (cw / 2) * 0.92, lo = f.lv[0], hi = f.lv[n - 1], pts = [];
-  let neg = null, pos = null, dmin = 0, dmax = 0;   // side-specific delta POCs (as used by P2)
+  let neg = null, pos = null, dmin = 0, dmax = 0;   // most negative / most positive delta level
   for (let L = lo; L <= hi; L += bin) {
     const d = dl.get(L) || 0;
     const pt = { x: mid + (d / m) * half, y: yOf(L + bin / 2) };
@@ -671,27 +612,6 @@ function drawProfile(f, cx0, cw, bin) {
   }
 }
 
-function tri(x, y, s, up, col) {
-  ctx.fillStyle = col; ctx.beginPath();
-  if (up) { ctx.moveTo(x, y); ctx.lineTo(x - s, y + s * 1.4); ctx.lineTo(x + s, y + s * 1.4); }
-  else { ctx.moveTo(x, y); ctx.lineTo(x - s, y - s * 1.4); ctx.lineTo(x + s, y - s * 1.4); }
-  ctx.closePath(); ctx.fill();
-}
-
-function drawMarkers(cs, l, r) {
-  const s = clamp(S.colW * 0.22, 4, 8);
-  for (let i = l; i <= r; i++) {
-    const c = cs[i];
-    if (!c.det) continue;
-    const cx = xOf(i) + S.colW / 2;
-    let yl = yOf(c.low), yh = yOf(c.high);
-    const f = showCells() ? fpFor(c, S.bin) : null;
-    if (f && f.lv.length) { yl = Math.max(yl, yOf(f.lv[0])); yh = Math.min(yh, yOf(f.lv[f.lv.length - 1] + S.bin)); }
-    if (c.det.L.sig) tri(cx, yl + 4, s, true, rgba(C.green, 1));
-    if (c.det.S.sig) tri(cx, yh - 4, s, false, rgba(C.red, 1));
-  }
-}
-
 function drawSelection(cs) {
   const i = S.selected;
   if (i < 0 || i >= cs.length) return;
@@ -713,9 +633,9 @@ function wickLines(c) {
   return [[Math.min(c.open, c.close), C.green, 'L'], [Math.max(c.open, c.close), C.red, 'S']];
 }
 
-// POC levels of the selected candle at the detector's POC bin (exactly what P1/P2 evaluate)
+// POC levels of the selected candle at the display bin
 function pocLevels(c) {
-  const pb = S.det.pocBin, out = [];
+  const pb = S.bin, out = [];
   for (const [key, col, lab] of [[`vpoc_${pb}`, C.vprof, 'vPOC'], [`dpoc_neg_${pb}`, C.red, 'Δ−'], [`dpoc_pos_${pb}`, C.green, 'Δ+']]) {
     const v = c[key];
     if (v !== null && v !== undefined) out.push({ p: v + pb / 2, lo: v, col, lab });
@@ -726,7 +646,7 @@ function pocLevels(c) {
 function drawPocMarkers(cs) {
   const i = S.selected;
   if (i < 0 || i >= cs.length) return;
-  const x = xOf(i), pb = S.det.pocBin;
+  const x = xOf(i), pb = S.bin;
   for (const t of pocLevels(cs[i])) {   // bucket outline across the column
     const y1 = yOf(t.lo + pb), y2 = yOf(t.lo);
     ctx.strokeStyle = rgba(t.col, 0.95); ctx.lineWidth = 2;
@@ -923,15 +843,14 @@ function drawCrosshair(cs) {
   const tt = $('tooltip');
   if (i < 0 || i >= cs.length) { tt.hidden = true; return; }
   const c = cs[i];
-  const oi = c.d_oi === null || c.d_oi === undefined ? '— (bez snapshotu)' :
+  const oi = c.d_oi === null || c.d_oi === undefined ? t('no_snapshot') :
     `${c.d_oi >= 0 ? '+' : '−'}${Math.abs(c.d_oi).toFixed(1)} BTC  ${fmtK(c.d_oi_usd)}`;
-  const sig = c.det ? (c.det.L.sig ? '\n▲ LONG signál' : '') + (c.det.S.sig ? '\n▼ SHORT signál' : '') : '';
   tt.textContent =
     `${fmtTs(c.start_ts, isVolumeAgg(S.agg))}\n` +
     `O ${fmtPrice(c.open)}  H ${fmtPrice(c.high)}\nL ${fmtPrice(c.low)}  C ${fmtPrice(c.close)}\n` +
     `Vol    ${fmtK(c.volume_usd, false)}  (${c.volume.toFixed(1)} BTC)\n` +
     `Delta  ${fmtK(c.delta_usd)}  (${c.delta >= 0 ? '+' : '−'}${Math.abs(c.delta).toFixed(1)} BTC)\n` +
-    `Trades ${c.trades.toLocaleString('en-US')}\nDur    ${fmtDur(c.duration_ms)}\nΔOI    ${oi}` + sig;
+    `Trades ${c.trades.toLocaleString('en-US')}\nDur    ${fmtDur(c.duration_ms)}\nΔOI    ${oi}`;
   tt.hidden = false;
   const wrap = $('chart-wrap').getBoundingClientRect();
   const tw = tt.offsetWidth, th = tt.offsetHeight;
@@ -942,77 +861,50 @@ function drawCrosshair(cs) {
 }
 
 // ---------------------------------------------------------------- side panel
-const okMark = (b) => b ? '<span class="ok">✔</span>' : '<span class="no">✘</span>';
 const sgn = (v) => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
 
 function updateSide() {
   const st = store();
-  $('det-count').innerHTML = `Signály v načteném rozsahu: <span class="pos">▲ ${st.signals.long}</span> · <span class="neg">▼ ${st.signals.short}</span>` +
-    `<br><span class="muted small">${st.candles.length} svíček načteno; prvních ${S.det.n} slouží k rozjezdu z-score (dočtou se při posunu doleva)</span>`;
-  $('det-w').disabled = !isVolumeAgg(S.agg);
-  $('det-note').textContent = isVolumeAgg(S.agg)
-    ? `Objemové svíčky (EXPERIMENTÁLNÍ): V1 = rychlost posledních W=${S.det.w} svíček (čas od uzavření svíčky t−W do t) vs ${S.det.n} dřívějších stejně dlouhých oken, která skončila před začátkem aktuálního okna.` : '';
   const i = S.selected, body = $('detail-body');
-  if (i < 0 || i >= st.candles.length) { body.innerHTML = '<span class="muted">Klikni na svíčku.</span>'; return; }
-  const c = st.candles[i], d = S.det, det = c.det;
-  if (!c._full) { body.innerHTML = '<span class="muted">Načítám detail…</span>'; loadDetail(c); return; }
-  const vol = isVolumeAgg(S.agg);
-  const zTxt = det.z === null ? 'n/a (málo historie)' : det.z.toFixed(3);
-  const v1Label = vol ? `rychlost ${d.w} svíček${c.vspeed !== null && c.vspeed !== undefined ? ` (${fmtDur(Math.exp(-c.vspeed))})` : ''}, z vs N=${d.n} oken, EXPERIM.`
-    : `z(ln Vol_USD), N=${d.n}`;
+  if (i < 0 || i >= st.candles.length) { body.innerHTML = `<span class="muted">${t('click_candle')}</span>`; return; }
+  const c = st.candles[i];
+  if (!c._full) { body.innerHTML = `<span class="muted">${t('loading_detail')}</span>`; loadDetail(c); return; }
+  const vol = isVolumeAgg(S.agg), fc = (S.meta && S.meta.features) || {};
+  const zTxt = c.z === null || c.z === undefined ? t('short_history') : c.z.toFixed(3);
+  const zLabel = vol ? `${t('z_speed', fc.vol_window || 10)}${c.vspeed !== null && c.vspeed !== undefined ? ` (${fmtDur(Math.exp(-c.vspeed))})` : ''}`
+    : `z(ln Vol_USD), N=${fc.n || 30}`;
   const f3 = (v) => fmtNum(v, 3);
-  const pb = d.pocBin, vp = c[`vpoc_${pb}`], dneg = c[`dpoc_neg_${pb}`], dpos = c[`dpoc_pos_${pb}`];
-  const lvl = (x) => (x === null || x === undefined) ? '—' : String(x);
-  const condBlock = (side) => {
-    const L = side === 'L', k = L ? det.L : det.S;
-    const share = L ? c.lw_share : c.uw_share, kv = L ? c.lw_vol_usd : c.uw_vol_usd;
-    const dk = L ? c.lw_delta_usd : c.uw_delta_usd;
-    const d2v = L ? c.lw_sell_share : c.uw_buy_share, d2n = L ? c.lw_sell_usd : c.uw_buy_usd, d2d = L ? c.sell_usd : c.buy_usd;
-    const rows = [
-      ['V1', `${v1Label}: ${zTxt} ≥ ${d.z}`, k.V1],
-      ['V2', `Vol(K)/Vol = ${fmtK(kv, false)}/${fmtK(c.volume_usd, false)} = ${f3(share)} ≥ ${d.v2}`, k.V2],
-      ['D1', `Δ(K) = ${fmtK(dk)} ${L ? '< 0' : '> 0'}`, k.D1],
-      ['D2', `${L ? 'Sell' : 'Buy'}(K)/${L ? 'Sell' : 'Buy'} = ${fmtK(d2n, false)}/${fmtK(d2d, false)} = ${f3(d2v)} ≥ ${d.d2}`, k.D2],
-      ['P1', `vol POC [${lvl(vp)}, +${pb}) ${L ? `celý pod min(O,C) ${fmtPrice(Math.min(c.open, c.close))}` : `celý nad max(O,C) ${fmtPrice(Math.max(c.open, c.close))}`}`, k.P1],
-      ['P2', `Δ POC (${L ? 'nejzápornější' : 'nejkladnější'}) [${lvl(L ? dneg : dpos)}, +${pb}) ${L ? `celý pod min(O,C) ${fmtPrice(Math.min(c.open, c.close))}` : `celý nad max(O,C) ${fmtPrice(Math.max(c.open, c.close))}`}`, k.P2],
-    ];
-    const enabled = L ? d.long : d.short;
-    const cnt = `${k.n}/${CONDS.filter((cn) => d.cond[cn]).length} zapnutých, potřeba ${requiredCount()}`;
-    return `<div class="sig ${k.sig ? (L ? 'pos' : 'neg') : 'muted'}">${L ? '▲ LONG (spodní knot)' : '▼ SHORT (horní knot)'}: ${k.sig ? 'SIGNÁL' : 'ne'}${enabled ? '' : ' (vypnuto)'}${c.valid ? '' : ' — H = L, přeskočeno'} <span class="muted small">(${cnt})</span></div>` +
-      '<div class="cond">' + rows.map(([n, t, ok]) => `<div class="row${d.cond[n] ? '' : ' off'}"><span>${n}</span><span>${t}${d.cond[n] ? '' : ' (nepočítá se)'}</span>${okMark(ok)}</div>`).join('') + '</div>';
-  };
   const kv = (rows) => '<table class="kv">' + rows.map(([a, b, cls]) => `<tr class="${cls || ''}"><td>${a}</td><td>${b}</td></tr>`).join('') + '</table>';
-  const oiTxt = c.d_oi === null || c.d_oi === undefined ? '— (žádná hranice 5min snapshotu)' :
+  const oiTxt = c.d_oi === null || c.d_oi === undefined ? t('oi_no_boundary') :
     `<span class="${sgn(c.d_oi)}">${c.d_oi >= 0 ? '+' : '−'}${Math.abs(c.d_oi).toFixed(1)} BTC / ${fmtK(c.d_oi_usd)}</span>`;
-  const colorTxt = c.color > 0 ? '<span class="pos">zelená</span>' : c.color < 0 ? '<span class="neg">červená</span>' : 'doji';
+  const colorTxt = c.color > 0 ? `<span class="pos">${t('green')}</span>` : c.color < 0 ? `<span class="neg">${t('red')}</span>` : 'doji';
   body.innerHTML =
     `<div>${vol ? fmtTs(c.start_ts, true) + ' → ' + fmtTs(c.last_ts, true) : fmtTs(c.start_ts)}</div>` +
-    condBlock('L') + condBlock('S') +
-    '<h3>Svíčka</h3>' + kv([
+    `<h3>${t('candle')}</h3>` + kv([
       ['O / H', `${fmtPrice(c.open)} / ${fmtPrice(c.high)}`], ['L / C', `${fmtPrice(c.low)} / ${fmtPrice(c.close)}`],
       ['Volume', `${fmtK(c.volume_usd, false)} · ${c.volume.toFixed(2)} BTC`],
       ['Buy / Sell', `${fmtK(c.buy_usd, false)} / ${fmtK(c.sell_usd, false)}`],
       ['Delta', `<span class="${sgn(c.delta_usd)}">${fmtK(c.delta_usd)}</span> · ${fmtNum(c.delta_ratio, 3)} vol`],
       ['CVD', `<span class="${sgn(c.cvd_usd)}">${fmtK(c.cvd_usd)}</span>`],
-      ['Barva · close pos', `${colorTxt} · ${fmtNum(c.close_pos, 3)}`],
+      [t('color_close'), `${colorTxt} · ${fmtNum(c.close_pos, 3)}`],
       ['Trades', c.trades.toLocaleString('en-US')], ['Duration', fmtDur(c.duration_ms)],
       ['ΔOI', oiTxt],
-      ['Vol / medián času dne', c.rel_tod === null || c.rel_tod === undefined ? '— (málo historie)' : c.rel_tod.toFixed(2) + '×'],
-      ['z (V1)', zTxt],
+      [t('rel_tod'), c.rel_tod === null || c.rel_tod === undefined ? t('short_history_dash') : c.rel_tod.toFixed(2) + '×'],
+      [zLabel, zTxt],
     ]) +
-    '<h3>Spodní knot (long)</h3>' + kv([
+    `<h3>${t('lower_wick')}</h3>` + kv([
       ['Vol(K)', `${fmtK(c.lw_vol_usd, false)} · ${c.lw_vol.toFixed(2)} BTC`],
       ['Buy(K) / Sell(K)', `${fmtK(c.lw_buy_usd, false)} / ${fmtK(c.lw_sell_usd, false)}`],
-      ['podíl objemu', f3(c.lw_share)], ['podíl na range', f3(c.lw_range)], ['koncentrace', fmtNum(c.lw_conc, 2)],
+      [t('vol_share'), f3(c.lw_share)], [t('range_share'), f3(c.lw_range)], [t('conc'), fmtNum(c.lw_conc, 2)],
       ['Δ(K) · Δ(K)/Vol(K)', `<span class="${sgn(c.lw_delta_usd)}">${fmtK(c.lw_delta_usd)}</span> · ${fmtNum(c.lw_delta_ratio, 3)}`],
-      ['sell v knotu / sell', f3(c.lw_sell_share)],
+      [t('sell_in_wick'), f3(c.lw_sell_share)],
     ]) +
-    '<h3>Horní knot (short)</h3>' + kv([
+    `<h3>${t('upper_wick')}</h3>` + kv([
       ['Vol(K)', `${fmtK(c.uw_vol_usd, false)} · ${c.uw_vol.toFixed(2)} BTC`],
       ['Buy(K) / Sell(K)', `${fmtK(c.uw_buy_usd, false)} / ${fmtK(c.uw_sell_usd, false)}`],
-      ['podíl objemu', f3(c.uw_share)], ['podíl na range', f3(c.uw_range)], ['koncentrace', fmtNum(c.uw_conc, 2)],
+      [t('vol_share'), f3(c.uw_share)], [t('range_share'), f3(c.uw_range)], [t('conc'), fmtNum(c.uw_conc, 2)],
       ['Δ(K) · Δ(K)/Vol(K)', `<span class="${sgn(c.uw_delta_usd)}">${fmtK(c.uw_delta_usd)}</span> · ${fmtNum(c.uw_delta_ratio, 3)}`],
-      ['buy v knotu / buy', f3(c.uw_buy_share)],
+      [t('buy_in_wick'), f3(c.uw_buy_share)],
     ]) + metricsHtml(c);
 }
 
@@ -1024,7 +916,7 @@ async function loadDetail(c) {
     const row = toRows(js)[0] || {};
     for (const [k, v] of Object.entries(row)) if (!(k in c) || c[k] === undefined) c[k] = v;
     c._full = true;
-  } catch (e) { status('Chyba detailu: ' + e.message); }
+  } catch (e) { status(t('err_detail') + e.message); }
   finally { c._loading = false; updateSide(); }
 }
 
@@ -1036,43 +928,43 @@ function metricsHtml(c) {
   const num = (v, d = 1) => (v === null || v === undefined) ? '—' : v.toFixed(d);
   const usd = (v) => (v === null || v === undefined) ? '—' : fmtK(v, false);
   const sd = (v) => `<span class="${sgn(v)}">${fmtK(v)}</span>`;
-  const auction = (b, s, unf) => `${usd(b)} / ${usd(s)} · ${unf ? 'nedokončená' : '<b>dokončená</b>'}`;
+  const auction = (b, s, unf) => `${usd(b)} / ${usd(s)} · ${unf ? t('unfinished') : `<b>${t('finished')}</b>`}`;
   const kv2 = (rows) => '<table class="kv">' + rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('') + '</table>';
-  const kv3 = (rows) => '<table class="kv kv3"><tr class="hd"><td></td><td>spodní</td><td>horní</td></tr>' +
+  const kv3 = (rows) => '<table class="kv kv3"><tr class="hd"><td></td><td>' + t('lower') + '</td><td>' + t('upper') + '</td></tr>' +
     rows.map(([a, l, h]) => `<tr><td>${a}</td><td>${l}</td><td>${h}</td></tr>`).join('') + '</table>';
   let oiTxt = '—';
   if (c.oi_vol_ratio !== null && c.oi_vol_ratio !== undefined) {
-    oiTxt = `<span class="${sgn(c.oi_vol_ratio)}">${(c.oi_vol_ratio * 100).toFixed(1)} %</span> objemu · ` +
-      (c.oi_vol_ratio < 0 ? 'OI klesá: zavírání pozic / likvidace' : 'OI roste: otevírání nových pozic');
+    oiTxt = `<span class="${sgn(c.oi_vol_ratio)}">${(c.oi_vol_ratio * 100).toFixed(1)} %</span> ${t('of_volume')} · ` +
+      (c.oi_vol_ratio < 0 ? t('oi_falling') : t('oi_rising'));
   }
-  return '<h3>Průběh delty uvnitř svíčky</h3>' + kv2([
-    ['min / max kum. delta', `${sd(c.dpath_min_usd)} / ${sd(c.dpath_max_usd)}`],
+  return `<h3>${t('delta_path')}</h3>` + kv2([
+    [t('cum_delta'), `${sd(c.dpath_min_usd)} / ${sd(c.dpath_max_usd)}`],
     // ratio only when the extreme is material (>= 1 % of the candle volume), otherwise it explodes
-    ['návrat od min (long)', `${usd(c.d_recov_l_usd)} · ${-c.dpath_min_usd >= 0.01 * c.volume_usd ? pct(c.d_recov_l_ratio) : '—'}`],
-    ['pokles od max (short)', `${usd(c.d_recov_s_usd)} · ${c.dpath_max_usd >= 0.01 * c.volume_usd ? pct(c.d_recov_s_ratio) : '—'}`],
-    ['low / high v čase', `${pct(c.t_low_frac)} / ${pct(c.t_high_frac)}`],
-    ['min / max delty v čase', `${pct(c.t_dmin_frac)} / ${pct(c.t_dmax_frac)}`],
+    [t('recov_long'), `${usd(c.d_recov_l_usd)} · ${-c.dpath_min_usd >= 0.01 * c.volume_usd ? pct(c.d_recov_l_ratio) : '—'}`],
+    [t('recov_short'), `${usd(c.d_recov_s_usd)} · ${c.dpath_max_usd >= 0.01 * c.volume_usd ? pct(c.d_recov_s_ratio) : '—'}`],
+    [t('t_lowhigh'), `${pct(c.t_low_frac)} / ${pct(c.t_high_frac)}`],
+    [t('t_dminmax'), `${pct(c.t_dmin_frac)} / ${pct(c.t_dmax_frac)}`],
   ]) +
-  `<h3>Extrémy (${S.meta ? S.meta.base_bin : 5} USD bucket)</h3>` + kv2([
-    ['aukce low: buy / sell', auction(c.low_buy_usd, c.low_sell_usd, c.unfinished_low)],
-    ['aukce high: buy / sell', auction(c.high_buy_usd, c.high_sell_usd, c.unfinished_high)],
-    ['vyčerpání low: 1 / 2 buckety vs POC', `${x(c.exh_low)} / ${x(c.exh_low2)}`],
-    ['vyčerpání high: 1 / 2 buckety vs POC', `${x(c.exh_high)} / ${x(c.exh_high2)}`],
+  `<h3>${t('extremes', S.meta ? S.meta.base_bin : 5)}</h3>` + kv2([
+    [t('auction_low'), auction(c.low_buy_usd, c.low_sell_usd, c.unfinished_low)],
+    [t('auction_high'), auction(c.high_buy_usd, c.high_sell_usd, c.unfinished_high)],
+    [t('exh_low'), `${x(c.exh_low)} / ${x(c.exh_low2)}`],
+    [t('exh_high'), `${x(c.exh_high)} / ${x(c.exh_high2)}`],
   ]) +
-  `<h3>Knoty</h3>` + kv3([
+  `<h3>${t('wicks')}</h3>` + kv3([
     [`imbalance buy (stack) ≥${mc.imbalance_ratio}:1`, `${c.lw_buy_imb} (${c.lw_buy_stack})`, `${c.uw_buy_imb} (${c.uw_buy_stack})`],
     [`imbalance sell (stack)`, `${c.lw_sell_imb} (${c.lw_sell_stack})`, `${c.uw_sell_imb} (${c.uw_sell_stack})`],
-    ['úsilí: USD / 1 USD pohybu', usd(c.lw_effort), usd(c.uw_effort)],
-    ['… vs tělo', x(c.lw_effort_ratio), x(c.uw_effort_ratio)],
-    [`velké obchody ≥${mc.big_trade_btc} BTC`, `${pct(c.lw_big_share)} (${c.lw_big_count})`, `${pct(c.uw_big_share)} (${c.uw_big_count})`],
-    ['… velké proti směru', `sell ${pct(c.lw_big_sell_share)}`, `buy ${pct(c.uw_big_buy_share)}`],
-    ['prům. obchod', usd(c.lw_avg_trade_usd), usd(c.uw_avg_trade_usd)],
-    ['… vs tělo', x(c.lw_size_ratio), x(c.uw_size_ratio)],
-    ['obchody / s', num(c.lw_rate), num(c.uw_rate)],
-    ['… vs tělo', x(c.lw_rate_ratio), x(c.uw_rate_ratio)],
-    ['čas v knotu', pct(c.lw_time_frac), pct(c.uw_time_frac)],
+    [t('effort'), usd(c.lw_effort), usd(c.uw_effort)],
+    [t('vs_body'), x(c.lw_effort_ratio), x(c.uw_effort_ratio)],
+    [t('big_trades', mc.big_trade_btc), `${pct(c.lw_big_share)} (${c.lw_big_count})`, `${pct(c.uw_big_share)} (${c.uw_big_count})`],
+    [t('big_against'), `sell ${pct(c.lw_big_sell_share)}`, `buy ${pct(c.uw_big_buy_share)}`],
+    [t('avg_trade'), usd(c.lw_avg_trade_usd), usd(c.uw_avg_trade_usd)],
+    [t('vs_body'), x(c.lw_size_ratio), x(c.uw_size_ratio)],
+    [t('trade_rate'), num(c.lw_rate), num(c.uw_rate)],
+    [t('vs_body'), x(c.lw_rate_ratio), x(c.uw_rate_ratio)],
+    [t('time_in_wick'), pct(c.lw_time_frac), pct(c.uw_time_frac)],
   ]) +
-  `<div class="muted small">tělo: prům. obchod ${usd(c.body_avg_trade_usd)}, ${num(c.body_rate)} obchodů/s, úsilí ${usd(c.body_effort)}</div>` +
+  `<div class="muted small">${t('body_line', usd(c.body_avg_trade_usd), num(c.body_rate), usd(c.body_effort))}</div>` +
   '<h3>Open interest</h3>' + kv2([['ΔOI / volume', oiTxt]]);
 }
 
@@ -1080,37 +972,8 @@ function updateStatus() {
   const st = store();
   if (st.minDay === null) return;
   const iso = (d) => new Date(d * DAY).toISOString().slice(0, 10);
-  const mode = showCells() ? (showText() ? 'buňky + čísla' : 'buňky') : 'jen svíčky';
+  const mode = showCells() ? (showText() ? t('mode_text') : t('mode_cells')) : t('mode_candles');
   status(`${S.agg} · data ${iso(st.minDay)} … ${iso(st.maxDay)} UTC · ${mode}`);
-}
-
-// ---------------------------------------------------------------- CSV export
-async function exportCsv() {
-  const st = store(), pb = S.det.pocBin;
-  const enabled = CONDS.filter((cn) => S.det.cond[cn]).join('+');
-  const rows = [];
-  for (const c of st.candles) {
-    for (const side of ['L', 'S']) {
-      const k = c.det[side];
-      if (!k.sig) continue;
-      rows.push({ cid: c.cid, start_ts: c.start_ts, side: side === 'L' ? 'long' : 'short', time_utc: new Date(c.start_ts).toISOString(),
-        time_local: fmtTs(c.start_ts), agg: S.agg, z_browser: c.det.z, V1: k.V1, V2: k.V2, D1: k.D1, D2: k.D2, P1: k.P1, P2: k.P2,
-        passed: k.n, enabled, required: requiredCount(), N: S.det.n, W: isVolumeAgg(S.agg) ? S.det.w : null,
-        z_min: S.det.z, v2_min: S.det.v2, d2_min: S.det.d2, poc_bin: pb });
-    }
-  }
-  if (!rows.length) { status('V načteném rozsahu nejsou žádné signály.'); return; }
-  status(`Export ${rows.length} signálů…`);
-  const r = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agg: S.agg, rows }) });
-  if (!r.ok) { status('Chyba exportu: ' + r.status); return; }
-  const blob = new Blob([await r.text()], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `signals_${S.agg}_${new Date(st.minDay * DAY).toISOString().slice(0, 10)}_${new Date(st.maxDay * DAY).toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  updateStatus();
 }
 
 // ---------------------------------------------------------------- navigation
@@ -1153,8 +1016,7 @@ async function loadRange(fromIso, toIso) {
   const est = Math.round((dB - dA + 1) * m.per_day);
   if (est > MAX_RANGE_CANDLES) {
     const maxDays = Math.floor(MAX_RANGE_CANDLES / m.per_day);
-    status(`Rozsah je pro ${S.agg} moc velký (~${est.toLocaleString('cs-CZ')} svíček, limit ${MAX_RANGE_CANDLES.toLocaleString('cs-CZ')}); `
-      + `zvol max ~${maxDays} dní nebo hrubší agregaci.`);
+    status(t('range_too_big', S.agg, est.toLocaleString(numLocale()), MAX_RANGE_CANDLES.toLocaleString(numLocale()), maxDays));
     return;
   }
   const st = newStore(), agg = S.agg;
@@ -1164,20 +1026,19 @@ async function loadRange(fromIso, toIso) {
   for (let d = dA; d <= dB; d += RANGE_CHUNK_DAYS) chunks.push([d, Math.min(dB, d + RANGE_CHUNK_DAYS - 1)]);
   const parts = new Array(chunks.length);
   let done = 0, next = 0;
-  status(`Načítám ${agg} ${fromIso} … ${toIso}: 0/${chunks.length}`);
+  status(t('loading_range', agg, fromIso, toIso, 0, chunks.length));
   const worker = async () => {
     while (next < chunks.length) {
       const k = next++, [a, b] = chunks[k];
       parts[k] = toRows(await fetchJson(`/api/candles?agg=${agg}&start=${a * DAY}&end=${(b + 1) * DAY}`));
-      status(`Načítám ${agg} ${fromIso} … ${toIso}: ${++done}/${chunks.length}`);
+      status(t('loading_range', agg, fromIso, toIso, ++done, chunks.length));
     }
   };
   try { await Promise.all([worker(), worker(), worker()]); }
-  catch (e) { status('Chyba načítání: ' + e.message); return; }
+  catch (e) { status(t('err_load') + e.message); return; }
   if (stores.get(agg) !== st) return;   // another load started meanwhile
   st.candles = parts.flat(); st.minDay = dA; st.maxDay = dB;
   S.range = { from: fromIso, to: toIso };
-  recompute(st);
   // fit the requested range [t0, t1) into the view
   layout();
   const cs = st.candles;
@@ -1196,7 +1057,7 @@ function centerTime() {
 }
 
 async function setAgg(a) {
-  const t = centerTime();
+  const tc = centerTime();
   S.agg = a; S.selected = -1;
   if (S.range) {   // keep the loaded range when it fits the new aggregation
     const m = S.meta.aggregations[a];
@@ -1204,14 +1065,12 @@ async function setAgg(a) {
     if (m && days * m.per_day <= MAX_RANGE_CANDLES) { await loadRange(S.range.from, S.range.to); return; }
     const r = S.range;
     S.range = null;
-    if (t !== null) await gotoTime(t, 'center');
-    status(`Rozsah ${r.from} … ${r.to} je pro ${a} moc velký (~${Math.round(days * m.per_day).toLocaleString('cs-CZ')} svíček, `
-      + `limit ${MAX_RANGE_CANDLES.toLocaleString('cs-CZ')}) – zobrazen výřez kolem středu, další data se dočítají při posunu.`);
+    if (tc !== null) await gotoTime(tc, 'center');
+    status(t('range_too_big_agg', r.from, r.to, a, Math.round(days * m.per_day).toLocaleString(numLocale()),
+      MAX_RANGE_CANDLES.toLocaleString(numLocale())));
     return;
   }
-  const st = store();
-  if (st.candles.length) recompute(st);
-  if (t !== null) await gotoTime(t, 'center');
+  if (tc !== null) await gotoTime(tc, 'center');
   else await gotoTime(dayNum(S.meta.aggregations[a].last_day) * DAY + DAY - 1, 'right');
 }
 
@@ -1312,15 +1171,26 @@ function bindLayers() {
   const sd = S.meta.sessions || { list: [] };
   const tzShort = sd.timezone === 'America/New_York' ? 'NY' : sd.timezone;
   $('sess-def').textContent = `(${sd.list.map((s) => `${s.name} ${s.start}–${s.end}`).join(', ')}, ${tzShort})`;
-  $('day-def').textContent = '(kalendářní den ve zvoleném pásmu)';
+  $('day-def').textContent = t('day_def');
   sync();
 }
 
 function applyTheme(name) {
   C = THEMES[name] || THEMES.dark;
   document.documentElement.dataset.theme = name;
-  $('theme-btn').textContent = name === 'dark' ? '☀ Světlý' : '☾ Tmavý';
+  $('theme-btn').textContent = name === 'dark' ? t('theme_light') : t('theme_dark');
   draw();
+}
+
+function applyLang(lang) {
+  LANG = lang in I18N ? lang : 'cs';
+  applyStaticI18n();
+  document.querySelectorAll('#lang-seg button').forEach((b) => b.classList.toggle('on', b.dataset.lang === LANG));
+  const custom = document.querySelector('#agg option[value="__custom"]');
+  if (custom) custom.textContent = t('custom_threshold');
+  if (S.meta) $('day-def').textContent = t('day_def');
+  $('theme-btn').textContent = document.documentElement.dataset.theme === 'light' ? t('theme_dark') : t('theme_light');
+  draw(); updateSide(); updateStatus();
 }
 
 function bindControls() {
@@ -1331,7 +1201,7 @@ function bindControls() {
   for (const a of names.sort((x, y) => order(x) - order(y) || x.localeCompare(y))) {
     const o = document.createElement('option'); o.value = a; o.textContent = labels[a] || volLabel(a); agg.appendChild(o);
   }
-  const custom = document.createElement('option'); custom.value = '__custom'; custom.textContent = 'Vlastní práh…'; agg.appendChild(custom);
+  const custom = document.createElement('option'); custom.value = '__custom'; custom.textContent = t('custom_threshold'); agg.appendChild(custom);
   agg.value = S.agg;
   agg.addEventListener('change', () => {
     if (agg.value === '__custom') { $('custom-wrap').hidden = false; return; }
@@ -1352,6 +1222,10 @@ function bindControls() {
   segs('tz-seg', 'tz', (tz) => { S.tz = tz; draw(); updateSide(); ensure(); });
   bindLayers();
   segs('oi-seg', 'oi', (u) => { S.oiUnit = u; draw(); });
+  segs('lang-seg', 'lang', (l) => {
+    applyLang(l);
+    try { localStorage.setItem('fp.lang', LANG); } catch (e) { /* ignore */ }
+  });
   let theme = 'dark';
   try { theme = localStorage.getItem('fp.theme') || 'dark'; } catch (e) { /* storage unavailable */ }
   applyTheme(theme);
@@ -1381,64 +1255,6 @@ function bindControls() {
     go();
   });
 
-  const det = [['det-n', 'n', (v) => clamp(Math.round(+v), 5, 500)], ['det-w', 'w', (v) => clamp(Math.round(+v), 2, 200)],
-    ['det-z', 'z', Number], ['det-v2', 'v2', Number], ['det-d2', 'd2', Number]];
-  for (const [id, key, conv] of det) {
-    $(id).value = S.det[key];
-    $(id).addEventListener('change', (e) => {
-      const v = conv(e.target.value);
-      if (Number.isNaN(v)) return;
-      S.det[key] = v; e.target.value = v; redetect();
-    });
-  }
-  for (const [id, key] of [['det-long', 'long'], ['det-short', 'short']]) {
-    $(id).checked = S.det[key];
-    $(id).addEventListener('change', (e) => { S.det[key] = e.target.checked; redetect(); });
-  }
-  // condition checkboxes + how many of them must hold
-  const box = $('det-conds');
-  for (const cn of CONDS) {
-    const lab = document.createElement('label'); lab.className = 'chk'; lab.title = COND_HELP[cn];
-    lab.innerHTML = `<input type="checkbox" data-cond="${cn}"> ${cn}`;
-    box.appendChild(lab);
-    const cb = lab.querySelector('input');
-    cb.checked = S.det.cond[cn];
-    cb.addEventListener('change', () => { S.det.cond[cn] = cb.checked; syncMinTrue(); redetect(); });
-  }
-  $('det-min').addEventListener('change', (e) => {
-    const m = CONDS.filter((cn) => S.det.cond[cn]).length, v = Math.round(+e.target.value);
-    S.det.minTrue = Number.isNaN(v) || v >= m ? null : clamp(v, 1, Math.max(1, m));
-    syncMinTrue(); redetect();
-  });
-  const pbSel = $('det-pocbin');
-  for (const b of S.meta.bins) { const o = document.createElement('option'); o.value = b; o.textContent = `${b} USD`; pbSel.appendChild(o); }
-  pbSel.value = S.det.pocBin;
-  pbSel.addEventListener('change', () => { S.det.pocBin = +pbSel.value; redetect(); });
-  syncMinTrue();
-  $('export').addEventListener('click', exportCsv);
-}
-
-const COND_HELP = {
-  V1: 'objem: z-score ln(Vol_USD) přes N předchozích svíček ≥ práh z (objemové svíčky: rychlost vzniku)',
-  V2: 'podíl objemu v knotu ≥ práh V2',
-  D1: 'delta v knotu proti směru (long < 0, short > 0)',
-  D2: 'podíl sell (short: buy) objemu svíčky, který proběhl v knotu ≥ práh D2',
-  P1: 'volume POC (bucket dle POC binu) leží celý v knotu',
-  P2: 'delta POC (long: úroveň s nejzápornější deltou, short: s nejkladnější) leží celý v knotu',
-};
-
-function syncMinTrue() {   // keep the 'how many must hold' input consistent with enabled conditions
-  const m = CONDS.filter((cn) => S.det.cond[cn]).length;
-  if (S.det.minTrue !== null && S.det.minTrue >= m) S.det.minTrue = null;
-  const inp = $('det-min');
-  inp.max = Math.max(1, m); inp.value = requiredCount();
-  $('det-min-of').textContent = `z ${m}` + (S.det.minTrue === null ? ' (všechny)' : '');
-}
-
-function redetect() {
-  for (const st of stores.values()) if (st.candles.length) recompute(st);
-  // larger N may need more history on the left
-  draw(); updateSide(); ensure();
 }
 
 async function customAgg() {
@@ -1446,15 +1262,15 @@ async function customAgg() {
   if (!(v > 0)) return;
   try {
     const r = await fetch(`/api/volume?unit=${unit}&value=${v}`, { method: 'POST' });
-    if (!r.ok) { status('Chyba: ' + (await r.json()).detail); return; }
+    if (!r.ok) { status(t('err') + (await r.json()).detail); return; }
     let job = await r.json();
     const agg = job.agg;
     while (job.status === 'running') {   // computed once on the server, then cached on disk
-      status(`Počítám ${agg}: ${job.done}/${job.total || '?'} dní…`);
+      status(t('computing', agg, job.done, job.total || '?'));
       await new Promise((res) => setTimeout(res, 700));
       job = (await fetchJson('/api/jobs'))[agg] || { status: 'done' };
     }
-    if (job.status === 'error') { status(`Chyba výpočtu ${agg}: ${job.error}`); return; }
+    if (job.status === 'error') { status(t('err_build', agg, job.error)); return; }
     S.meta = await fetchJson('/api/meta');
     const sel = $('agg');
     if (![...sel.options].some((o) => o.value === agg)) {
@@ -1463,19 +1279,16 @@ async function customAgg() {
     }
     sel.value = agg; $('custom-wrap').hidden = true;
     await setAgg(agg);
-  } catch (e) { status('Chyba: ' + e.message); }
+  } catch (e) { status(t('err') + e.message); }
 }
 
 async function init() {
+  try { applyLang(localStorage.getItem('fp.lang') || 'cs'); } catch (e) { applyLang('cs'); }
   S.meta = await fetchJson('/api/meta');
   S.tz = S.meta.timezone || S.tz;
   S.bin = S.meta.default_bin || S.bin;
-  Object.assign(S.det, { n: S.meta.detector.n, w: S.meta.detector.vol_window || 10, z: S.meta.detector.z_min, v2: S.meta.detector.v2_min, d2: S.meta.detector.d2_min,
-    long: S.meta.detector.long, short: S.meta.detector.short, pocBin: S.meta.detector.poc_bin || 25,
-    minTrue: S.meta.detector.min_true ?? null });
-  if (S.meta.detector.conditions) for (const cn of CONDS) S.det.cond[cn] = S.meta.detector.conditions.includes(cn);
   if (!(S.agg in S.meta.aggregations)) S.agg = Object.keys(S.meta.aggregations)[0];
-  if (!S.agg) { status('Žádná data – spusť python -m fp build'); return; }
+  if (!S.agg) { status(t('no_data')); return; }
   bindControls();
   const last = dayNum(S.meta.aggregations[S.agg].last_day);
   $('range-from').value = new Date((last - 2) * DAY).toISOString().slice(0, 10);
@@ -1483,4 +1296,4 @@ async function init() {
   await gotoTime((last + 1) * DAY - 1, 'right');
 }
 
-init().catch((e) => status('Chyba: ' + e.message));
+init().catch((e) => status(t('err') + e.message));

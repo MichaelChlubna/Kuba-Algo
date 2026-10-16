@@ -235,27 +235,16 @@ def _within(row: dict, ref: dict) -> dict[str, bool]:
     return {k: abs(row[k] / v - 1) <= KNOWN_TOL for k, v in ref.items()}
 
 
-def describe_conditions(row: dict, cfg: dict) -> list[str]:
-    d = cfg["detector"]
-    def mark(ok):
-        return "OK  " if ok else "FAIL"
+def describe_features(row: dict, cfg: dict) -> list[str]:
     z = row["z"]
-    pb = d.get("poc_bin", 25)
-    conds = list(d.get("conditions", ["V1", "V2", "D1", "D2"]))
     lines = [
         f"    valid (H > L): {row['valid']}",
-        f"    LONG  V1 z(ln Vol_USD, N={d['n']}) = {z:.3f} >= {d['z_min']}            {mark(row['L_V1'])}" if z is not None else "    LONG  V1 z = n/a (not enough history) FAIL",
-        f"    LONG  V2 Vol(K)/Vol = {_fmt_usd(row['lw_vol_usd'])}/{_fmt_usd(row['volume_usd'])} = {row['lw_share']:.3f} >= {d['v2_min']}  {mark(row['L_V2'])}",
-        f"    LONG  D1 Delta(K) = {_fmt_usd(row['lw_delta_usd'])} < 0                        {mark(row['L_D1'])}",
-        f"    LONG  D2 SellVol(K)/SellVol = {_fmt_usd(row['lw_sell_usd'])}/{_fmt_usd(row['sell_usd'])} = "
-        + (f"{row['lw_sell_share']:.3f}" if row['lw_sell_share'] is not None else "n/a") + f" >= {d['d2_min']}  {mark(row['L_D2'])}",
-        f"    LONG  P1 volume POC bucket [{row.get(f'vpoc_{pb}')}, +{pb}) entirely below min(O,C)={min(row['open'], row['close'])}"
-        f"   {mark(row.get('L_P1'))}{'' if 'P1' in conds else ' (not enabled)'}",
-        f"    LONG  P2 delta POC (most negative) bucket [{row.get(f'dpoc_neg_{pb}')}, +{pb}) entirely below min(O,C)"
-        f"   {mark(row.get('L_P2'))}{'' if 'P2' in conds else ' (not enabled)'}",
-        f"    => long_signal = {row['long_signal']}  (enabled {','.join(conds)}, required {d.get('min_true') or 'all'})",
-        f"    SHORT V2 {row['uw_share']:.3f}  D1 {_fmt_usd(row['uw_delta_usd'])}  D2 "
-        + (f"{row['uw_buy_share']:.3f}" if row['uw_buy_share'] is not None else "n/a") + f"  => short_signal = {row['short_signal']}",
+        f"    volume z(ln Vol_USD, N={cfg['features']['n']}) = " + (f"{z:.3f}" if z is not None else "n/a (not enough history)"),
+        f"    lower wick: Vol(K)/Vol = {_fmt_usd(row['lw_vol_usd'])}/{_fmt_usd(row['volume_usd'])} = {row['lw_share']:.3f}, "
+        f"Delta(K) = {_fmt_usd(row['lw_delta_usd'])}, SellVol(K)/SellVol = {_fmt_usd(row['lw_sell_usd'])}/{_fmt_usd(row['sell_usd'])} = "
+        + (f"{row['lw_sell_share']:.3f}" if row['lw_sell_share'] is not None else "n/a"),
+        f"    upper wick: Vol(K)/Vol = {row['uw_share']:.3f}, Delta(K) = {_fmt_usd(row['uw_delta_usd'])}, BuyVol(K)/BuyVol = "
+        + (f"{row['uw_buy_share']:.3f}" if row['uw_buy_share'] is not None else "n/a"),
         f"    features: wick range share {row['lw_range']:.3f}, concentration "
         + (f"{row['lw_conc']:.2f}" if row['lw_conc'] is not None else "n/a")
         + f", Delta(K)/Vol(K) " + (f"{row['lw_delta_ratio']:+.3f}" if row['lw_delta_ratio'] is not None else "n/a")
@@ -284,8 +273,7 @@ def known_cases(cfg: dict) -> bool:
     print(f"  Candle A: {ts(a)}  O {a['open']} H {a['high']} L {a['low']} C {a['close']}  "
           f"vol {_fmt_usd(a['volume_usd'])}  delta {_fmt_usd(a['delta_usd'])}  "
           f"(all within +-5 % of reference: {ok})")
-    print("\n".join(describe_conditions(a, cfg)))
-    ok &= bool(a["long_signal"])
+    print("\n".join(describe_features(a, cfg)))
     nxt = df.filter(pl.col("start_ts") > a["start_ts"]).head(3)
     print("  Three candles after A (delta sign check):")
     for r, ref in zip(nxt.iter_rows(named=True), KNOWN_AFTER_A_DELTAS):
@@ -300,5 +288,5 @@ def known_cases(cfg: dict) -> bool:
     wb = _within(b, KNOWN_B)
     print(f"  Candle B (A + 50 min): {ts(b)}  O {b['open']} H {b['high']} L {b['low']} C {b['close']}  "
           f"vol {_fmt_usd(b['volume_usd'])}  delta {_fmt_usd(b['delta_usd'])}  (within +-5 %: {wb})")
-    print("\n".join(describe_conditions(b, cfg)))
+    print("\n".join(describe_features(b, cfg)))
     return ok

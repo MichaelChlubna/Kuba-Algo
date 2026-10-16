@@ -2,7 +2,7 @@ import polars as pl
 import pytest
 
 from fp.build import time_candles_with_features
-from fp.features import add_oi_delta, add_rolling, detect, rolling_z
+from fp.features import add_oi_delta, add_rolling, rolling_z
 from tests.conftest import T0, make_trades
 
 P = 300_000
@@ -37,65 +37,34 @@ def test_red_candle_body_uses_close_as_low():
     assert r["color"] == -1
 
 
-def test_zero_wick_share_zero_and_no_signal():
+def test_zero_wick_share_zero():
     r = one_candle([(0, 100.0, 1.0, True), (1, 101.0, 1.0, False)])  # O=L, C=H
     assert r["lw_vol"] == 0 and r["lw_share"] == 0.0 and r["lw_range"] == 0.0
-    df = detect(pl.DataFrame([r]).with_columns(z=pl.lit(5.0)), 2.0, 0.0, 0.0)
-    assert not df["L_V2"][0] and not df["long_signal"][0]
 
 
-def test_no_sell_volume_fails_d2():
+def test_no_sell_volume_sell_share_null():
     r = one_candle([(0, 100.0, 1.0, False), (1, 99.0, 5.0, False), (2, 100.5, 1.0, False)])
     assert r["sell_usd"] == 0 and r["lw_sell_share"] is None
-    df = detect(pl.DataFrame([r]).with_columns(z=pl.lit(5.0)), 2.0, 0.5, 0.5)
-    assert not df["L_D2"][0] and not df["long_signal"][0]
 
 
-def test_flat_candle_skipped():
+def test_flat_candle_not_valid():
     r = one_candle([(0, 100.0, 1.0, True), (1, 100.0, 1.0, True)])
-    df = detect(pl.DataFrame([r]).with_columns(z=pl.lit(5.0)), 0.0, 0.0, 0.0)
-    assert not r["valid"] and not df["long_signal"][0] and not df["short_signal"][0]
+    assert not r["valid"]
 
 
-def absorption_long_rows(offset):
-    # opens 100, dips to 95 with heavy selling, closes 101 (green); colour is not filtered
-    return [(offset, 100.0, 1.0, False), (offset + 1, 96.0, 30.0, True), (offset + 2, 95.0, 10.0, True),
-            (offset + 3, 97.0, 5.0, False), (offset + 4, 101.0, 2.0, False)]
-
-
-def absorption_short_rows(offset):
-    return [(offset, 100.0, 1.0, True), (offset + 1, 104.0, 30.0, False), (offset + 2, 105.0, 10.0, False),
-            (offset + 3, 103.0, 5.0, True), (offset + 4, 99.0, 2.0, True)]
-
-
-def series_with_last(last_rows, n=30):
+def test_volume_z_spike_on_heavy_candle():
+    n = 30
     rows = []
     for i in range(n):  # quiet history with slightly varying volume
         q = 1.0 + 0.1 * (i % 5)
         rows += [(i * P, 100.0, q, False), (i * P + 1, 100.5, q, True), (i * P + 2, 100.2, q, False)]
-    rows += last_rows(n * P)
-    df = time_candles_with_features(make_trades(rows), P)
-    return detect(add_rolling(df, n), 2.0, 0.5, 0.5)
-
-
-def test_detector_long_signal():
-    df = series_with_last(absorption_long_rows)
+    rows += [(n * P, 100.0, 1.0, False), (n * P + 1, 96.0, 30.0, True), (n * P + 2, 95.0, 10.0, True),
+             (n * P + 3, 97.0, 5.0, False), (n * P + 4, 101.0, 2.0, False)]
+    df = add_rolling(time_candles_with_features(make_trades(rows), P), n)
     last = df.row(-1, named=True)
+    assert df["z"][:n].is_null().all()
     assert last["z"] > 2
     assert last["lw_share"] >= 0.5 and last["lw_delta_usd"] < 0 and last["lw_sell_share"] >= 0.5
-    assert last["long_signal"] and not last["short_signal"]
-    assert df["long_signal"].sum() == 1
-
-
-def test_detector_short_signal_mirror():
-    last = series_with_last(absorption_short_rows).row(-1, named=True)
-    assert last["short_signal"] and not last["long_signal"]
-
-
-def test_detector_side_toggle_and_thresholds():
-    df = series_with_last(absorption_long_rows)
-    assert not detect(df, 2.0, 0.5, 0.5, long=False)["long_signal"][-1]
-    assert not detect(df, 2.0, 0.99, 0.5)["long_signal"][-1]
 
 
 def test_rolling_z_excludes_current_and_needs_n():

@@ -82,19 +82,8 @@ main { flex: 1; display: flex; min-height: 0; }
 #side h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
   margin: 6px 0 8px; }
 #side section + section { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 4px; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-bottom: 8px; }
-.grid2 label { display: flex; justify-content: space-between; align-items: center; gap: 6px; color: var(--dim); }
-.grid2 label.chk { justify-content: flex-start; color: var(--text); }
-.sub { color: var(--dim); font-size: 12px; margin: 2px 0 4px; }
-.conds { display: grid; grid-template-columns: repeat(6, auto); gap: 4px 8px; margin-bottom: 8px; }
-.conds label.chk { display: flex; align-items: center; gap: 3px; font-family: var(--mono); cursor: pointer; }
-#det-min { width: 52px; }
-.row2 { margin-bottom: 6px; }
-.row2 label { display: flex; align-items: center; gap: 6px; color: var(--dim); }
-.cond .row.off { opacity: 0.45; }
 .muted { color: var(--dim); }
 .small { font-size: 11px; margin-top: 6px; }
-#det-count { margin: 4px 0 8px; font-family: var(--mono); }
 
 table.kv { width: 100%; border-collapse: collapse; font: 12px/1.5 var(--mono); }
 table.kv td { padding: 1px 2px; vertical-align: top; }
@@ -104,11 +93,6 @@ table.kv tr.sep td { border-top: 1px solid var(--line); padding-top: 4px; }
 table.kv3 td:nth-child(2) { text-align: right; }
 table.kv3 tr.hd td { color: var(--dim); border-bottom: 1px solid var(--line); }
 table.kv td:first-child { white-space: normal; }
-.cond { font: 12px/1.5 var(--mono); margin: 4px 0; }
-.cond .row { display: grid; grid-template-columns: 30px 1fr 22px; gap: 4px; }
-.ok { color: var(--green); }
-.no { color: var(--red); }
 .pos { color: var(--green); }
 .neg { color: var(--red); }
-.sig { font-weight: 600; margin: 6px 0 2px; }
 h3 { font-size: 12px; margin: 10px 0 2px; color: var(--text); }

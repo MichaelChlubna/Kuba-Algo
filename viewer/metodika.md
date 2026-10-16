@@ -1,8 +1,12 @@
-# Metodika – BTCUSDT perp: data, footprint, detektor absorpce
+# Metodika – BTCUSDT perp: data, footprint, features absorpce
 
 Stav k 2026-10-09. Dokument popisuje, co projekt aktuálně umí a jak přesně to počítá: od stažení dat
-přes agregaci a validaci až po viewer, detektor a metriky uvnitř svíček. U detektoru a metrik je kromě
+přes agregaci a validaci až po viewer, features a metriky uvnitř svíček. U features a metrik je kromě
 výpočtu uvedena i **teze** (proč tam metrika je) a **co v ní chceme vidět**.
+
+> **2026-10-16:** detektor absorpce (podmínky V1–P2, skládání signálu, `long_signal` / `short_signal`,
+> export signálů) byl z pipeline i vieweru odstraněn. Features, ze kterých počítal (z-score, knoty, POC),
+> se dál počítají a ukládají do series pro navazující analýzy (sekce 10).
 
 Konvence: všechny objemy „USD“ jsou notional (Σ cena × množství). „Long“ = kandidát na obrat nahoru
 po absorpci prodejů ve spodním knotu, „short“ = zrcadlově horní knot. Parametry v `config.yaml`
@@ -20,7 +24,7 @@ jsou uvedeny jako `sekce.klíč` s defaultní hodnotou.
 7. [Open interest](#7-open-interest)
 8. [Časová pásma](#8-časová-pásma)
 9. [Validace](#9-validace)
-10. [Detektor absorpce](#10-detektor-absorpce)
+10. [Features knotu a objemu](#10-features-knotu-a-objemu)
 11. [Metriky uvnitř svíčky](#11-metriky-uvnitř-svíčky)
 12. [Viewer](#12-viewer)
 13. [Konfigurace, CLI, testy](#13-konfigurace-cli-testy)
@@ -42,10 +46,10 @@ knot. Stopy v datech:
   nakonec nevrátila),
 - delta v knotu je záporná (agrese byla opravdu na straně prodeje), přesto cena knot opustila.
 
-Detektor tyto stopy kvantifikuje; metriky uvnitř svíčky pak pomáhají rozlišit „skutečnou“ absorpci od
-náhodného knotu (vyčerpání, imbalance, intenzita, velcí hráči, průběh delty, OI).
+Features knotu a objemu tyto stopy kvantifikují; metriky uvnitř svíčky pak pomáhají rozlišit „skutečnou“
+absorpci od náhodného knotu (vyčerpání, imbalance, intenzita, velcí hráči, průběh delty, OI).
 
-Mimo rozsah (zatím): kontext vyšších timeframů (struktura, POI, value areas), ruční štítkování signálů,
+Mimo rozsah (zatím): kontext vyšších timeframů (struktura, POI, value areas), ruční štítkování,
 živá data.
 
 ---
@@ -70,7 +74,7 @@ data.binance.vision ──download──► data/raw (zip + .CHECKSUM)
           data/derived/vstate/<vol agg>/DAY (stav rozpracované objemové svíčky)
                                        │ build: celorozsahová fáze (finalize)
                                        ▼
-          data/derived/series/<agg>/DAY    (+ CVD, ΔOI, z-score, rel_tod, podmínky, signály)
+          data/derived/series/<agg>/DAY    (+ CVD, ΔOI, z-score, rel_tod)
                                        │
                  validate ◄────────────┤
                                        ▼
@@ -78,7 +82,7 @@ data.binance.vision ──download──► data/raw (zip + .CHECKSUM)
 ```
 
 Kód: `fp/download.py`, `convert.py`, `candles.py`, `volume_bars.py`, `footprint.py`, `features.py`,
-`metrics.py`, `build.py`, `validate.py`, `server.py`, frontend `fp/static/{index.html,app.js,style.css}`.
+`metrics.py`, `build.py`, `validate.py`, `server.py`, frontend `fp/static/{index.html,i18n.js,app.js,style.css}`.
 Stack: Python 3.11+ (testováno na 3.14), polars, pyarrow, FastAPI + uvicorn, pytest; frontend vanilla JS +
 Canvas 2D bez build kroku.
 
@@ -93,7 +97,7 @@ Veřejné denní dumpy Binance USD-M futures (bez API klíče), instrument BTCUS
 
 | dataset | cesta (pod `data/futures/um/daily/`) | použití |
 |---|---|---|
-| aggTrades | `aggTrades/BTCUSDT/BTCUSDT-aggTrades-YYYY-MM-DD.zip` | vše: svíčky, footprint, detektor, metriky |
+| aggTrades | `aggTrades/BTCUSDT/BTCUSDT-aggTrades-YYYY-MM-DD.zip` | vše: svíčky, footprint, features, metriky |
 | metrics | `metrics/BTCUSDT/BTCUSDT-metrics-YYYY-MM-DD.zip` | open interest (5min snapshoty) |
 | klines 1m, 5m | `klines/BTCUSDT/{1m,5m}/BTCUSDT-{1m,5m}-YYYY-MM-DD.zip` | jen validace |
 | trades (volitelné) | `trades/BTCUSDT/BTCUSDT-trades-YYYY-MM-DD.zip` | oprava dnů s chybějícími aggTrades (sekce 9) a přesná rekonciliace ve validaci |
@@ -140,7 +144,7 @@ Velikost: aggTrades ~14 MB parquet/den (1,8 mil. řádků v rušném dni).
 1. **Denní fáze** (pro každý den a agregaci): svíčky, složky knotů, statické features, footprint,
    POC, metriky uvnitř svíčky. Hotové dny se přeskakují (`--force` přestaví).
 2. **Celorozsahová fáze** (`finalize`, vždy přes všechny postavené dny, je levná): CVD, ΔOI,
-   ΔOI/volume, rolling z-score, objem vůči času dne, podmínky a signály detektoru s defaulty z configu.
+   ΔOI/volume, rolling z-score, objem vůči času dne.
    Díky tomu rolling statistiky navazují přes hranice dnů.
 
 Objemové svíčky se staví sekvenčně přes všechny dny se stavem (viz 5.2). Build 8 dní všech agregací
@@ -183,7 +187,7 @@ Objemové svíčky se staví sekvenčně přes všechny dny se stavem (viz 5.2).
   `aggregation.cvd_reset_timezone` (default UTC)
 - `trades` (Σ `last − first + 1`), `agg_trades`, `first_ts, last_ts, start_ts, end_ts, duration_ms`
 - `d_oi, d_oi_usd, oi_end` (sekce 7)
-- features detektoru (sekce 10) a metriky (sekce 11)
+- features knotu a objemu (sekce 10) a metriky (sekce 11)
 
 ---
 
@@ -225,7 +229,7 @@ Objemové svíčky se staví sekvenčně přes všechny dny se stavem (viz 5.2).
   (prohlížeč `Intl`, backend polars/zoneinfo) ⇒ letní/zimní čas automaticky (2026: EDT od 8. 3.,
   EST od 1. 11.; Evropa přechází 25. 10.).
 - Zarovnání svíček se DST nemění (posun NY vždy celé hodiny).
-- `rel_tod` porovnává **lokální NY čas** (`detector.tod_timezone`), aby US session zůstávala na stejném
+- `rel_tod` porovnává **lokální NY čas** (`features.tod_timezone`), aby US session zůstávala na stejném
   místě i přes přechod času.
 - Reset CVD: 00:00 UTC (lze přepnout na NY).
 
@@ -276,35 +280,39 @@ Rozhodnutí: zůstáváme u aggTrades (podle zadání); rozdíly 1 a 2 jsou jen 
 obchody (bod 3) jsou doplněné ze surových trades.
 
 **Známé případy 2026-10-08 (M5)** – hledány podle hodnot z reference, ne podle času:
-- **A = 12:50 UTC (08:50 NY)**: objem 462,0M, delta −99,2M, L 81 849, H 82 385 → **long signál**
-  (z 4,35; V2 0,768; Δ(K) −123M; D2 0,852; P1 i P2 splněny).
+- **A = 12:50 UTC (08:50 NY)**: objem 462,0M, delta −99,2M, L 81 849, H 82 385
+  (z 4,35; podíl objemu v knotu 0,768; Δ(K) −123M; sell v knotu / sell 0,852; vPOC i Δ− POC v knotu).
 - tři svíčky po A: delta +10,3M / −1,5M / +12,9M (znaménka sedí),
-- **B = 13:40 UTC (09:40 NY)**: objem 370,9M, delta −47,0M, L 81 715 → **long signál**
-  (z 2,83; V2 0,783; Δ(K) −54,4M; D2 0,825).
+- **B = 13:40 UTC (09:40 NY)**: objem 370,9M, delta −47,0M, L 81 715
+  (z 2,83; podíl objemu v knotu 0,783; Δ(K) −54,4M; sell v knotu / sell 0,825).
 
 ---
 
-## 10. Detektor absorpce
+## 10. Features knotu a objemu
+
+Features se počítají v buildu (`fp/features.py`, `fp/footprint.py`) a ukládají ke každé svíčce do series.
+Prohlížeč je jen zobrazuje v detailu svíčky, nic nepřepočítává. (Do 2026-10-16 z nich detektor skládal
+podmínky V1–P2 a signály long/short; ten byl odstraněn.)
 
 ### 10.1 Definice knotu
 - **Spodní knot K** = obchody s cenou **striktně pod** min(O, C); **horní knot** = striktně nad max(O, C).
 - Počítá se **z jednotlivých aggTrades**, ne z footprint binů (bin by do knotu zahrnul i ceny těla).
   U objemových svíček z rozdělených částí obchodů.
-- Barva svíčky se nefiltruje – long může být i červená svíčka s dlouhým spodním knotem.
+- Barva svíčky se nefiltruje – kandidát na long může být i červená svíčka s dlouhým spodním knotem.
 
-### 10.2 Podmínky
+### 10.2 Features
 Všechny podíly v USD notional. Short je vždy zrcadlový (horní knot, opačné znaménko, buy místo sell).
 
-#### V1 – neobvyklý objem
+#### Neobvyklý objem – `z`
 - **Výpočet:** `z = (ln Vol_USD − mean) / std`, mean a std (výběrová, ddof = 1) z ln Vol_USD
-  **N = 30 předchozích svíček bez aktuální** (`detector.n`). Podmínka `z ≥ 2` (`detector.z_min`).
+  **N = 30 předchozích svíček bez aktuální** (`features.n`).
 - **Proč logaritmus:** objem je silně pravostranně rozdělený; v logu je rozdělení blíž normálnímu a
   z-score smysluplnější.
 - **Teze:** absorpce vyžaduje velkou účast; bez neobvyklého objemu jde spíš o běžný šum.
 - **Co chceme vidět:** z výrazně nad 2 (A: 4,35).
-- **Okraj:** dokud není N předchozích svíček, z = null ⇒ V1 nesplněna.
+- **Okraj:** dokud není N předchozích svíček, z = null. Rolling okno běží přes hranice dnů.
 
-#### V1 u objemových svíček – zrychlení toku objemu (EXPERIMENTÁLNÍ)
+#### `z` u objemových svíček – zrychlení toku objemu (EXPERIMENTÁLNÍ)
 - **Proč jinak:** všechny objemové svíčky mají stejný objem, objemové z-score nedává smysl. Měří se
   proto **rychlost, jakou objem přichází**. Nehodnotí se jedna svíčka (tu může vytvořit jediný
   výbuch nebo jeden velký obchod), ale **plovoucí okno posledních W svíček**: „posledních W svíček
@@ -316,115 +324,76 @@ Všechny podíly v USD notional. Short je vždy zrcadlový (horní knot, opačn�
   - baseline: N hodnot `x(t−W), x(t−W−1), …, x(t−W−N+1)` – stejně dlouhá okna, která **skončila
     před začátkem aktuálního okna**, takže se s ním nepřekrývají a aktuální výbuch neovlivní vlastní
     srovnání,
-  - `z = (x(t) − mean) / std` (výběrová std), podmínka `z ≥ z_min`,
-  - W = `detector.vol_window` (default 10, v UI „okno W“), N = `detector.n`.
+  - `z = (x(t) − mean) / std` (výběrová std),
+  - W = `features.vol_window` (default 10), N = `features.n`.
 - **Teze:** absorpce na objemových svíčkách se projeví zhuštěním obchodování – během krátké doby
   proteče násobek obvyklého objemu (agresivní prodeje + pasivní limitní strana, stopy, likvidace).
-- **Co chceme vidět:** vysoké z u svíčky s absorpčním knotem (V2/D1/D2), tj. knot vznikl uprostřed
-  zrychlení.
+- **Co chceme vidět:** vysoké z u svíčky s absorpčním knotem, tj. knot vznikl uprostřed zrychlení.
 - **Vlastnosti a pozor:**
   - okno **reaguje se zpožděním**: první svíčky výbuchu mají v okně ještě pomalé starší svíčky, takže
     jejich z je nízké; vysoké z mají až svíčky později ve výbuchu (2026-10-08 08:50:15 NY, začátek
     flushe, Vol 100M: okno 10 svíček = 1 h 35 min, z = 0,32). Menší W reaguje rychleji, ale víc šumí,
-  - zrychlení trvá několik svíček ⇒ vysoké z mívá série po sobě jdoucích svíček; výběr dělají
-    podmínky knotu,
-  - potřebuje 2W + N − 1 svíček historie (W pro první okno, N oken baseline, odstup W),
-  - signály oproti dřívější verzi (z jedné svíčky): Vol 100M USD 9 / 5 → 21 / 15 (8 dní).
+  - zrychlení trvá několik svíček ⇒ vysoké z mívá série po sobě jdoucích svíček,
+  - potřebuje 2W + N − 1 svíček historie (W pro první okno, N oken baseline, odstup W).
 
-#### V2 – objem v knotu
-- **Výpočet:** `Vol(K) / Vol ≥ 0,5` (`detector.v2_min`).
+#### Objem v knotu – `lw_share`
+- **Výpočet:** `Vol(K) / Vol`. Nulový knot ⇒ 0.
 - **Teze:** většina obchodování proběhla na cenách, které trh odmítl.
-- **Co chceme vidět:** vysoký podíl (A: 0,768). Nulový knot ⇒ podíl 0 ⇒ nesplněno.
+- **Co chceme vidět:** vysoký podíl (A: 0,768).
 
-#### D1 – směr agrese v knotu
-- **Výpočet:** `Δ(K) = Buy(K) − Sell(K) < 0` (short: > 0).
+#### Směr agrese v knotu – `lw_delta_usd`, `lw_delta_ratio`
+- **Výpočet:** `Δ(K) = Buy(K) − Sell(K)` a `Δ(K) / Vol(K)`.
 - **Teze:** v knotu musí převažovat agrese **proti** výslednému pohybu – jinak by knot vznikl pasivně
   (např. jen díky chybějící likviditě), ne pohlcením.
-- **Co chceme vidět:** výrazně záporná Δ(K) (A: −123M), ideálně i v poměru k Vol(K).
+- **Co chceme vidět (long):** výrazně záporná Δ(K) (A: −123M), ideálně i v poměru k Vol(K).
 
-#### D2 – kde proběhla agrese
-- **Výpočet:** `Sell(K) / Sell ≥ 0,5` (short: `Buy(K) / Buy`) (`detector.d2_min`).
+#### Kde proběhla agrese – `lw_sell_share`
+- **Výpočet:** `Sell(K) / Sell` (short: `uw_buy_share = Buy(K) / Buy`). Sell = 0 ⇒ null.
 - **Teze:** většina agresivních prodejů celé svíčky se odehrála v knotu, tj. prodávající „vystřelili“
   na úrovni, kterou cena nedokázala udržet.
-- **Co chceme vidět:** vysoký podíl (A: 0,852). Sell = 0 ⇒ nesplněno.
+- **Co chceme vidět:** vysoký podíl (A: 0,852).
 
-#### P1 – volume POC v knotu
-- **Výpočet:** volume POC bucket `[vpoc, vpoc + bin)` leží **celý** pod min(O, C), tj.
-  `vpoc + bin ≤ min(O,C)` (short: `vpoc > max(O,C)`). Bin = `detector.poc_bin` (default 25, v UI volitelný).
-- **Výklad (odsouhlaseno):** přísná varianta – celý bucket musí být v knotu. Volnější varianta (stačí
-  střed bucketu) by dávala víc signálů.
-- **Teze:** cena s největším objemem svíčky (místo, kde se „bojovalo“) je v odmítnuté zóně – hlavní
-  souboj se odehrál v knotu a cena z něj odešla.
-- **Co chceme vidět:** POC hluboko v knotu (A: POC 81 950, tělo od 82 204).
+#### Volume POC a delta POC – `vpoc_<b>`, `dpoc_neg_<b>`, `dpoc_pos_<b>`
+- **Výpočet:** z footprintu v USD notional pro biny b = 5/10/25/50/100: `vpoc` = dolní hrana bucketu
+  s největším objemem, `dpoc_neg` = bucket s **nejzápornější** deltou (nejsilnější agresivní prodej),
+  `dpoc_pos` = s **nejkladnější** deltou (nejsilnější agresivní nákup). Při shodě rozhoduje nižší
+  úroveň; bez záporné (kladné) delty je `dpoc_neg` (`dpoc_pos`) null.
+- **„Celý v knotu“** (jak to dřív vyhodnocovaly P1/P2): long `poc + b ≤ min(O,C)`, short `poc > max(O,C)`.
+  Přísná varianta – celý bucket musí ležet v knotu; volnější (jen střed bucketu) by vyhověla častěji.
+- **Teze:** cena s největším objemem (místo, kde se „bojovalo“) a místo nejsilnější agrese proti směru
+  leží v odmítnuté zóně – hlavní souboj se odehrál v knotu a cena z něj odešla. Delta POC je stranově
+  specifický: pro long rozhoduje jen nejzápornější úroveň, takže velká **kladná** delta jinde ve svíčce
+  ho neovlivní.
+- **Co chceme vidět (long):** POC i `dpoc_neg` hluboko v knotu (A: vPOC 81 950, Δ− 81 875, tělo od 82 204).
 - **Pozor:** výsledek závisí na binu (5 vs 25 USD může dát jinou odpověď).
-
-#### P2 – delta POC v knotu
-- **Výpočet:** svíčka má **dva delta POC**: `dpoc_neg` = úroveň s nejzápornější deltou (nejsilnější
-  agresivní prodej) a `dpoc_pos` = úroveň s nejkladnější deltou (nejsilnější agresivní nákup).
-  Long: bucket `[dpoc_neg, dpoc_neg + bin)` leží **celý** pod min(O, C) (`dpoc_neg + bin ≤ min(O,C)`);
-  short: `dpoc_pos > max(O,C)`. Stejně přísně jako P1, bin = `detector.poc_bin`.
-- **Výklad (odsouhlaseno, upraveno 2026-10-09):** delta POC je stranově specifický – pro long se bere
-  jen nejzápornější úroveň, takže velká **kladná** delta jinde ve svíčce (např. nahoře před výplachem)
-  podmínku neovlivní, i když je v absolutní hodnotě větší. Původní verze navíc vyžadovala
-  `dpoc_neg ≤ vpoc` (delta POC ve stejném bucketu jako volume POC nebo níž); to bylo zrušeno, protože
-  vyřazovalo validní případy, kdy se objem při výplachu soustředil ještě hlouběji než nejsilnější prodej
-  (na M5 to byl důvod všech 191 neúspěchů P2 mezi 764 long kandidáty). Nyní stačí, aby nejsilnější
-  agresivní prodej proběhl v knotu.
-- **Teze:** místo, kde prodávající tlačili nejagresivněji, je v odmítnuté zóně – jejich nejsilnější
-  agrese narazila na pasivní kupce a cena se vrátila.
-- **Co chceme vidět:** `dpoc_neg` hluboko v knotu (A: 81 875, tělo od 82 204). Žádná úroveň se zápornou
-  deltou ⇒ nesplněno.
 - **Ve vieweru:** fialový Δ profil má dvě tečky – červenou na nejzápornější a zelenou na nejkladnější
-  úrovni (v binu zobrazení); u vybrané svíčky jsou v binu detektoru orámované buckety vPOC (žlutý /
-  oranžový), Δ− (červený) a Δ+ (zelený) se štítky na cenové ose – přesně to, co P1/P2 vyhodnocují.
-- Na M5 (2026-01-01 … 10-08) splňuje P2 577 ze 764 long kandidátů (V1–D2), P1 561, obojí 472.
+  úrovni (v binu zobrazení); u vybrané svíčky jsou v binu zobrazení orámované buckety vPOC (žlutý /
+  oranžový), Δ− (červený) a Δ+ (zelený) se štítky na cenové ose.
 
-### 10.3 Skládání signálu
-- Každou podmínku lze zapnout/vypnout (zaškrtávátka V1 V2 D1 D2 P1 P2; `detector.conditions`,
-  default V1–D2).
-- **Min. splněných** (`detector.min_true`, null = všechny zapnuté): signál vznikne, když je svíčka
-  platná (H > L) a splněno je aspoň k zapnutých podmínek.
-- Long a short lze vypnout zvlášť (`detector.long/short`).
-- Nezapnuté podmínky se vyhodnocují taky (panel ukazuje „proč ne“), jen se nepočítají.
-- Okrajové případy: nulový knot ⇒ podíl 0, nesplněno; Sell = 0 ⇒ D2 nesplněna; H = L ⇒ svíčka
-  přeskočena (`valid = false`); chybějící POC ⇒ P1/P2 nesplněny.
-
-### 10.4 Kde se počítá
-- Backend (`fp/features.py`) počítá všechny features a podmínky s defaulty z configu (pro validaci,
-  report, export).
-- **Prohlížeč přepočítává** z-score a všechny podmínky za běhu z uložených features při změně N, prahů,
-  zapnutých podmínek, „min. splněných“ nebo POC binu. Backend proto vrací i N svíček před levým
-  okrajem (`pad`) a prohlížeč drží aspoň N + 20 svíček vlevo (u objemových N + 2W + 20); prvních
-  N (2W + N) načtených svíček slouží jako rozjezd z-score (dočtou se při posunu doleva).
-- Kontrola shody: prohlížeč dává stejné z-score i signály jako Python (po odečtení rozjezdových svíček).
-
-### 10.5 Uložené features (ke každé svíčce, nejen k signálům)
+### 10.3 Uložené features (ke každé svíčce)
 | feature | výpočet |
 |---|---|
-| `z` | V1 (viz výše) |
-| `vspeed` | jen objemové svíčky: −ln(čas posledních W svíček v ms), vstup do V1 |
+| `valid` | H > L (svíčka má range) |
+| `z` | z-score objemu (viz výše) |
+| `vspeed` | jen objemové svíčky: −ln(čas posledních W svíček v ms), vstup do `z` |
 | `lw_share` / `uw_share` | podíl objemu v knotu |
 | `lw_range` / `uw_range` | délka knotu / range = (min(O,C) − L) / (H − L) |
 | `lw_conc` / `uw_conc` | koncentrace = podíl objemu v knotu / podíl knotu na range (> 1 = v knotu se obchodovalo hustěji než v průměru svíčky) |
 | `lw_delta_usd`, `lw_delta_ratio` | Δ(K) a Δ(K) / Vol(K) |
-| `lw_sell_share` / `uw_buy_share` | D2 |
+| `lw_sell_share` / `uw_buy_share` | podíl sell (buy) objemu svíčky, který proběhl v knotu |
 | `delta_usd`, `delta_ratio` | celková delta a delta / volume |
 | `color`, `close_pos` | barva (+1/−1/0), pozice close = (C − L) / (H − L) |
 | `trades`, `duration_ms`, `d_oi` | počet obchodů, trvání, ΔOI |
-| `rel_tod` | objem / medián objemu ve stejném NY čase dne za předchozích 20 dní (`detector.tod_days`); jen časové svíčky a jen s plnou historií |
-| surové složky | `{lw,uw}_{vol,buy,sell}[_usd]` – z nich lze prahy přepočítat |
+| `rel_tod` | objem / medián objemu ve stejném NY čase dne za předchozích 20 dní (`features.tod_days`); jen časové svíčky a jen s plnou historií |
+| surové složky | `{lw,uw}_{vol,buy,sell}[_usd]` – z nich lze podíly přepočítat |
 | POC | `vpoc_<b>`, `dpoc_neg_<b>`, `dpoc_pos_<b>` pro b = 5/10/25/50/100 |
-| podmínky a signály | `L_V1 … L_P2`, `S_V1 … S_P2`, `long_signal`, `short_signal` (s defaulty z configu) |
-
-Počty signálů (2026-01-01 … 10-08, 281 dní, default V1–D2): M1 2 970 long / 2 938 short,
-M5 764 / 724, M15 275 / 301, Vol 100M USD 762 / 722, Vol 1000 BTC 947 / 939 (W = 10).
 
 ---
 
 ## 11. Metriky uvnitř svíčky
 
-Informativní metriky (zatím nevstupují do signálu), počítané v denní fázi buildu (`fp/metrics.py`),
-zobrazené v panelu svíčky a v CSV exportu. Rozlišují „kvalitní“ absorpci od náhodného knotu.
+Informativní metriky počítané v denní fázi buildu (`fp/metrics.py`), uložené v series a zobrazené
+v panelu svíčky. Rozlišují „kvalitní“ absorpci od náhodného knotu.
 Parametry: `metrics.imbalance_ratio` 3, `imbalance_min_usd` 50 000, `stack_min` 3 (zatím jen
 informativní), `big_trade_btc` 5.
 
@@ -465,7 +434,7 @@ informativní), `big_trade_btc` 5.
 - **Výpočet (diagonální, 5USD bin):**
   - buy imbalance na úrovni L: `buy(L) ≥ 3 × sell(L − 5)` a `buy(L) ≥ 50K USD`,
   - sell imbalance na úrovni L: `sell(L) ≥ 3 × buy(L + 5)` a `sell(L) ≥ 50K USD`,
-  - chybějící sousední úroveň = 0; počítají se jen úrovně ležící **celé** v knotu (jako P1),
+  - chybějící sousední úroveň = 0; počítají se jen úrovně ležící **celé** v knotu,
   - `lw_buy_imb`, `lw_sell_imb` = počet úrovní, `*_stack` = nejdelší řada po sobě jdoucích úrovní.
 - **Proč diagonálně:** agresivní kupec bere nabídku (ask) na L, agresivní prodávající bere poptávku
   (bid) o tick níž – srovnávají se strany, které spolu reálně soupeří.
@@ -511,7 +480,7 @@ informativní), `big_trade_btc` 5.
 - **Teze:** rychlé odmítnutí (krátký čas v knotu, velký objem) = silná reakce; dlouhé setrvání =
   testování / akumulace.
 - **Co chceme vidět:** zatím otevřené – obě varianty mají výklad; metrika slouží k rozlišení typů
-  signálů. A: 29 % času ve spodním knotu.
+  knotů. A: 29 % času ve spodním knotu.
 - **Pozor:** přesnost ≤ 100 ms (časy aggTrades).
 
 ### 11.9 ΔOI / volume
@@ -538,14 +507,14 @@ informativní), `big_trade_btc` 5.
 ### 12.2 Rozložení
 - **Lišta:** agregace (M1 / M5 / M15 / Vol 100M USD / Vol 1000 BTC / další cachované / Vlastní práh…),
   bin (5/10/25/50/100), režim buňky, **rozsah Od – Do + Načíst / Vše**, **Profil**, **Δ Profil**, NY/UTC, ΔOI BTC/USD,
-  **☀ Světlý / ☾ Tmavý**, stavový řádek.
+  **☀ Světlý / ☾ Tmavý**, **CZ / EN**, stavový řádek.
 - **Hlavní panel (footprint):** sloupec = svíčka, řádky = cenové úrovně; vlevo u sloupce tenká svíčka.
   Buňka: hodnota ve formátu K/M a barva podle režimu; intenzita podle |hodnoty| vůči 95. percentilu
   viditelných buněk, hodnoty pod 12 % bez výplně.
 - **Osy:** cenová vpravo, časová dole (NY nebo UTC, oddělovače dnů).
 - **Tabulka pod footprintem:** Volume, CVD, Delta (USD), Trades, OI Δ, barevně podle znaménka.
 - **Panel ΔOI:** histogram s nulovou linií, BTC/USD; prázdné u svíček bez hranice snapshotu.
-- **Boční panel:** nastavení detektoru a detail vybrané svíčky.
+- **Boční panel:** detail vybrané svíčky.
 
 ### 12.3 Režimy buňky a úrovně detailu
 - **delta** (default): text +2.4M / −530K, zelená/červená,
@@ -558,7 +527,7 @@ informativní), `big_trade_btc` 5.
   objemu po úrovních aktuálního binu, normovaná na maximum svíčky, tečka = POC.
 - **Δ Profil** (fialový): křivka delty kolem svislé nulové osy uprostřed buňky (doprava nákupy,
   doleva prodeje), normovaná na max |delta|; červená tečka = úroveň s nejzápornější deltou, zelená =
-  s nejkladnější (dva delta POC jako v P2, ale v binu zobrazení).
+  s nejkladnější (dva delta POC, v binu zobrazení).
 - Zobrazují se v režimu buněk, ve všech režimech buňky; lze kombinovat.
 
 ### 12.4a Vrstvy: sessions a dny (tlačítko „Vrstvy ▾“)
@@ -583,24 +552,19 @@ Každá vrstva má vlastní on/off přepínač (stav si pamatuje prohlížeč):
 - **tažení cenové osy** nahoru/dolů = přiblížení/oddálení ceny; **tažení časové osy** doprava/doleva =
   širší/užší svíčky,
 - dvojklik = reset zoomu; dvojklik na ose = reset jen té osy,
-- crosshair + tooltip: OHLC, objem (USD a BTC), delta, trades, duration, ΔOI, signál,
+- crosshair + tooltip: OHLC, objem (USD a BTC), delta, trades, duration, ΔOI,
 - klik na svíčku = detail v bočním panelu + čárkované hranice knotu na min(O,C) (L, zelená) a
-  max(O,C) (S, červená) a orámované POC buckety v binu detektoru (vPOC, Δ−, Δ+); všechny se štítky na
+  max(O,C) (S, červená) a orámované POC buckety v binu zobrazení (vPOC, Δ−, Δ+); všechny se štítky na
   cenové ose, které se skládají pod sebe, aby se nepřekrývaly.
 
-### 12.6 Panel detektoru a detail svíčky
-- Nastavení: N, okno W (jen objemové svíčky), práh z, V2, D2, long/short, zaškrtávátka V1–P2,
-  min. splněných, POC bin.
-- Počet signálů v načteném rozsahu, export signálů s features a metrikami do CSV.
-- Detail svíčky: obě strany (long/short) s ✔/✘ a čísly u každé podmínky, „x/y zapnutých, potřeba k“,
-  nezapnuté podmínky zašedlé; OHLC, objemy, delta, CVD, barva, close pos, trades, duration, ΔOI,
-  rel_tod, z; složky obou knotů; sekce metrik (průběh delty, extrémy, tabulka knotů spodní/horní, OI).
+### 12.6 Detail svíčky
+- OHLC, objemy, delta, CVD, barva, close pos, trades, duration, ΔOI, rel_tod, z; složky obou knotů;
+  sekce metrik (průběh delty, extrémy, tabulka knotů spodní/horní, OI). Stáhne se při kliknutí
+  (`/api/candle`).
 
 ### 12.6a Načtení rozsahu dat
 - „Od“ a „Do“ jsou dny ve zvoleném časovém pásmu (NY / UTC); **Načíst** stáhne všechny svíčky rozsahu a
   zobrazí celý rozsah na šířku grafu, **Vše** načte celý dostupný dataset dané agregace.
-- Počty signálů a export se pak týkají celého načteného rozsahu (např. celý rok M5: 80 928 svíček,
-  764 long / 724 short – stejně jako v Pythonu).
 - Při přepnutí agregace se rozsah zachová, pokud se vejde do limitu; jinak se ukáže výřez kolem středu
   a hláška o limitu.
 - Limit **150 000 svíček** na rozsah (paměť prohlížeče): celý dataset jde pro M5, M15 a objemové svíčky;
@@ -608,21 +572,23 @@ Každá vrstva má vlastní on/off přepínač (stav si pamatuje prohlížeč):
 - Doba načtení: celý rok M5 ~6,5 s (20denní dávky, 3 souběžně).
 - Při posunu za okraj rozsahu se další dny dál dočítají líně, jako dřív.
 
-### 12.7 Vzhled
+### 12.7 Vzhled a jazyk
 - Tmavý režim a světlý s krémovým pozadím `#f8f4e4` (žádná čistá bílá); vlastní paleta pro každý
   režim (tmavší zelená/červená, slabší výplně a tmavý text ve světlém).
+- **Jazyk CZ / EN:** přepínač v liště, volbu si pamatuje prohlížeč. Všechny texty rozhraní jsou ve slovníku
+  `fp/static/i18n.js` (`I18N.cs`, `I18N.en`); statické HTML se překládá přes atributy `data-i18n`,
+  `data-i18n-title` a `data-i18n-ph`.
 
 ### 12.8 Technika
 - Backend FastAPI: `GET /api/meta` (včetně počtu svíček a průměru na den pro každou agregaci),
   `GET /api/candles?agg&start&end&pad[&full=1]`, `GET /api/candle?agg&cid&start_ts` (všechny sloupce jedné
-  svíčky), `POST /api/export` (signály z prohlížeče + všechny features ze serveru → CSV),
+  svíčky),
   `GET /api/periods?start&end&tz&bin` (sessions a dny: high/low, volume/delta profil),
   `GET /api/footprint?agg&start&end`, `POST /api/volume?unit&value` (výpočet vlastního prahu na pozadí,
   cache na disku), `GET /api/jobs`. Sloupcový JSON s gzipem; UI soubory s `Cache-Control: no-cache`.
-- **Lehké sloupce:** `/api/candles` posílá jen ~45 sloupců potřebných pro graf, tabulku, tooltip a
-  detektor (OHLC, objemy, delta, CVD, trades, ΔOI, složky knotů pro V2/D1/D2, POC pro P1/P2, z, vspeed),
-  zaokrouhlené; detail svíčky (metriky, složky knotů) se stáhne až při kliknutí a export spojí signály
-  se všemi features na serveru. Díky tomu se vejde celý rok M5 (~25 MB JSON před gzipem).
+- **Lehké sloupce:** `/api/candles` posílá jen ~30 sloupců potřebných pro graf, tabulku, tooltip a
+  POC značky vybrané svíčky (OHLC, objemy, delta, CVD, trades, ΔOI, POC), zaokrouhlené; detail svíčky
+  (features, metriky, složky knotů) se stáhne až při kliknutí. Díky tomu se vejde celý rok M5.
 - **Sloučené vykreslení:** když připadá méně než 1,5 px na svíčku, svíčky se slučují po pixelových
   sloupcích (high/low skupiny, barva podle open první a close poslední svíčky; v tabulce součty objemu,
   delty, obchodů a ΔOI, CVD poslední hodnota); časová osa přejde na dny / týdny / měsíce. Celý rok M5
@@ -641,7 +607,7 @@ Každá vrstva má vlastní on/off přepínač (stav si pamatuje prohlížeč):
 |---|---|
 | `download` | `start`, `end`, `datasets` [aggTrades, metrics, klines_1m, klines_5m], `workers` 4, `retries` 3 |
 | `aggregation` | `timeframes` [1m, 5m, 15m], `volume_usd` [1e8], `volume_btc` [1000], `base_bin` 5, `cvd_reset` daily, `cvd_reset_timezone` UTC |
-| `detector` | `n` 30, `vol_window` 10, `z_min` 2, `v2_min` 0,5, `d2_min` 0,5, `long`/`short` true, `conditions` [V1, V2, D1, D2], `min_true` null, `poc_bin` 25, `tod_days` 20, `tod_timezone` America/New_York |
+| `features` | `n` 30, `vol_window` 10, `tod_days` 20, `tod_timezone` America/New_York |
 | `metrics` | `imbalance_ratio` 3, `imbalance_min_usd` 50 000, `stack_min` 3, `big_trade_btc` 5 |
 | `sessions` | `timezone` America/New_York, `list`: Asia 18:00–03:00, London 03:00–08:00, New York 08:00–17:00 |
 | `server` | `host` 127.0.0.1, `port` 8000, `timezone` America/New_York |
@@ -655,10 +621,10 @@ python -m fp serve    [--host H] [--port P]
 python -m pytest
 ```
 
-### 13.3 Testy (pytest, 48)
+### 13.3 Testy (pytest, 47)
 Syntetické obchody: časové svíčky a CVD, dělení obchodu u objemových svíček (včetně stavu přes dny a
-obchodu přes víc svíček, okenní z-score rychlosti), zařazení do knotu včetně hraničních cen, detektor (okrajové případy, zrcadlový
-short, k z n), POC a P1/P2, footprint a re-binning, časová pásma a DST, ΔOI, metriky uvnitř svíčky
+obchodu přes víc svíček, okenní z-score rychlosti), zařazení do knotu včetně hraničních cen, features knotu
+(okrajové případy, z-score), POC úrovně, footprint a re-binning, časová pásma a DST, ΔOI, metriky uvnitř svíčky
 (ručně spočítané hodnoty), oprava chybějících aggTrades ze surových trades (včetně přesahu přes půlnoc), API serveru.
 
 ---
@@ -671,13 +637,13 @@ short, k z n), POC a P1/P2, footprint a re-binning, časová pásma a DST, ΔOI,
 - **Chybějící obchody v aggTrades (leden–červen 2026):** doplněny ze surových trades (101 dní,
   5 962 BTC, sloupec `repaired_btc`). Nová data je potřeba hlídat validací (kategorie „agg gap“).
 - **OI** jen po 5 min; likvidace nejsou k dispozici.
-- **Závislost na binu:** P1/P2, aukce, vyčerpání a imbalance se mohou lišit podle velikosti bucketu.
-- **Objemové svíčky:** V1 přes rychlost okna W svíček je experimentální a reaguje se zpožděním
+- **Závislost na binu:** POC, aukce, vyčerpání a imbalance se mohou lišit podle velikosti bucketu.
+- **Objemové svíčky:** `z` přes rychlost okna W svíček je experimentální a reaguje se zpožděním
   (volba W); poslední rozpracovaná svíčka se nezobrazuje.
 - **rel_tod** potřebuje 20 dní historie (od ~21. 1. 2026 je k dispozici).
 - **Prahy metrik** (3:1, 50K USD, 5 BTC) jsou výchozí odhady – kalibrovat na delší historii.
 - **Data:** k dispozici 2026-01-01 … 2026-10-08 (281 dní, ~10 GB). Další krok: kvantitativní analýza
-  metrik v paralelní složce (které metriky signály skutečně odlišují); ruční štítkování a kontext
+  features a metrik v paralelní složce (které skutečně odlišují obraty); ruční štítkování a kontext
   vyšších timeframů přijdou později.
 
 ---
@@ -704,4 +670,3 @@ Prefix `lw_` = spodní knot, `uw_` = horní knot. `_usd` = USD notional, bez př
 | velké obchody | `{lw,uw}_big_{buy,sell}_usd`, `{lw,uw}_big_count`, `{lw,uw}_big_share`, `lw_big_sell_share`, `uw_big_buy_share` |
 | intenzita | `{lw,uw,body}_trades`, `body_vol_usd`, `{lw,uw,body}_avg_trade_usd`, `{lw,uw}_size_ratio`, `{lw,uw,body}_rate`, `{lw,uw}_rate_ratio` |
 | čas v knotu | `lw_time_ms`, `uw_time_ms`, `lw_time_frac`, `uw_time_frac` |
-| detektor | `L_V1`, `L_V2`, `L_D1`, `L_D2`, `L_P1`, `L_P2`, `S_*` zrcadlově, `long_signal`, `short_signal` |

@@ -22,17 +22,9 @@ aggregation:
   cvd_reset: daily             # none | daily
   cvd_reset_timezone: UTC      # timezone of the daily CVD reset (00:00), e.g. UTC or America/New_York
 
-detector:
-  n: 30
-  vol_window: 10               # volume candles: V1 = speed of the last W candles vs N earlier W-windows
-  z_min: 2.0
-  v2_min: 0.5
-  d2_min: 0.5
-  long: true
-  short: true
-  conditions: [V1, V2, D1, D2]  # enabled conditions (V1 V2 D1 D2 P1 P2); P1/P2 = volume / delta POC in the wick
-  min_true: null               # how many of the enabled must hold (null = all)
-  poc_bin: 25                  # bucket size (USD) for volume / delta POC in P1, P2: 5 10 25 50 100
+features:
+  n: 30                        # volume z-score: baseline of N previous candles (volume candles: N earlier windows)
+  vol_window: 10               # volume candles: z = speed of the last W candles vs N earlier W-windows
   tod_days: 20                 # time-of-day relative volume lookback (days)
   tod_timezone: America/New_York  # 'same time of day' is local time here (follows DST)
 

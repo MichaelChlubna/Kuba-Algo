@@ -1,8 +1,9 @@
-# BTCUSDT perp – footprint pipeline a detektor absorpce
+# BTCUSDT perp – footprint pipeline a viewer
 
-> Hotové kroky 1–6 (data, časové svíčky + validace, detektor, footprint + OI, viewer, objemové svíčky). Zbývá: rozšíření na 3 měsíce dat.
+> Hotové kroky 1–6 (data, časové svíčky + validace, features knotů, footprint + OI, viewer, objemové svíčky). Zbývá: rozšíření na 3 měsíce dat.
+> Detektor absorpce (podmínky V1–P2, signály, export) byl 2026-10-16 odstraněn; features, ze kterých počítal, zůstávají v series.
 
-Podrobný systematický popis (data → zpracování → viewer → detektor a metriky s tezemi): **[metodika.md](metodika.md)**.
+Podrobný systematický popis (data → zpracování → viewer → features a metriky s tezemi): **[metodika.md](metodika.md)**.
 
 ## Struktura složek
 
@@ -10,7 +11,7 @@ Podrobný systematický popis (data → zpracování → viewer → detektor a m
 footprint/
 ├── viewer.bat, start.bat   spouštěče (dvojklik)
 ├── data/                   sdílená data (raw zipy, parquet, odvozené svíčky/footprint/series, validace)
-└── viewer/                 tato fáze 1: pipeline + viewer + detektor + metriky (hotovo, neměnit)
+└── viewer/                 tato fáze 1: pipeline + viewer + features + metriky
     ├── fp/                 Python balík (download, build, validate, server) + fp/static (frontend)
     ├── tests/              pytest
     ├── config.yaml         konfigurace; cesty k datům relativně: ../data/...
@@ -34,7 +35,7 @@ pip install polars pyarrow pyyaml requests fastapi uvicorn pytest
 python -m fp download                          # rozsah z config.yaml
 python -m fp download --start 2026-10-08 --end 2026-10-08
 python -m fp download --datasets trades       # volitelné: surové obchody jen pro přesnou validaci
-python -m fp build                             # parquet + svíčky M1/M5/M15 + objemové + features + signály
+python -m fp build                             # parquet + svíčky M1/M5/M15 + objemové + features
 python -m fp build --end yesterday             # totéž do včerejška (vhodné po stažení nových dní)
 python -m fp validate                          # porovnání s klines + známé případy A/B
 python -m fp serve                             # viewer na http://localhost:8000
@@ -47,7 +48,7 @@ python -m pytest
 | `data/raw/` | zipy + `.CHECKSUM` (zrcadlo data.binance.vision) |
 | `data/parquet/{aggTrades,metrics,klines_1m,klines_5m,trades}/BTCUSDT/YYYY-MM-DD.parquet` | převedené CSV, normalizované názvy sloupců, časy v ms UTC |
 | `data/derived/candles/{1m,5m,15m}/` | denní fáze: svíčky + složky knotů + features závislé jen na svíčce |
-| `data/derived/series/{1m,5m,15m}/` | celorozsahová fáze: CVD, ΔOI, rolling z-score, objem vůči času dne, signály |
+| `data/derived/series/{1m,5m,15m}/` | celorozsahová fáze: CVD, ΔOI, rolling z-score, objem vůči času dne |
 | `data/validation/` | CSV s neshodami proti klines |
 
 `build` je idempotentní (hotové dny přeskočí, `--force` přestaví). Celorozsahová fáze se přepočítá
@@ -152,51 +153,38 @@ svíčky. Pro M5/M15 je efekt relativně menší. Odstranit by šel jen přechod
   snapshot není, ΔOI je prázdné (null), nic se neinterpoluje. U M1 tak má hodnotu jen každá pátá
   svíčka (ta, která končí na hranici 5 min); M5 a M15 mají hodnotu vždy.
 
-## Detektor (krok 3)
+## Features knotů a objemu (krok 3)
 
 Knot se počítá z jednotlivých aggTrades (ne z footprint binů): spodní knot = cena **striktně pod**
-min(O, C), horní = **striktně nad** max(O, C). Všechny podíly jsou v USD notional.
+min(O, C), horní = **striktně nad** max(O, C). Všechny podíly jsou v USD notional. Definice, teze
+a co v nich hledat: metodika.md, sekce 10.
 
-| podmínka | long | short |
+| feature | spodní knot (long) | horní knot (short) |
 |---|---|---|
-| V1 | z = (ln Vol_USD − průměr) / std z N=30 předchozích svíček (bez aktuální) ≥ 2 | stejné |
-| V2 | Vol(K)/Vol ≥ 0,5 | totéž pro horní knot |
-| D1 | Δ(K) < 0 | Δ(K) > 0 |
-| D2 | SellVol(K)/SellVol ≥ 0,5 | BuyVol(K)/BuyVol ≥ 0,5 |
+| `z` | z = (ln Vol_USD − průměr) / std z N=30 předchozích svíček (bez aktuální) | stejné |
+| `*_share` | Vol(K)/Vol | totéž pro horní knot |
+| `*_delta_usd` | Δ(K) = Buy(K) − Sell(K) | zrcadlově |
+| `lw_sell_share` / `uw_buy_share` | SellVol(K)/SellVol | BuyVol(K)/BuyVol |
+| POC | `vpoc_<b>`, `dpoc_neg_<b>` (nejzápornější delta) | `vpoc_<b>`, `dpoc_pos_<b>` (nejkladnější delta) |
 
-Další podmínky (volitelné, defaultně vypnuté):
+- POC se počítá z footprintu v USD notional pro biny 5/10/25/50/100. Při shodě objemu rozhoduje nižší
+  úroveň; když svíčka nemá žádnou úroveň se zápornou (kladnou) deltou, `dpoc_neg` (`dpoc_pos`) je null.
 
-| podmínka | long | short |
-|---|---|---|
-| P1 | volume POC bucket `[vpoc, vpoc + bin)` leží **celý** pod min(O, C) | bucket celý nad max(O, C) (`vpoc > max(O,C)`) |
-| P2 | delta POC = úroveň s **nejzápornější** deltou, bucket celý v knotu (`dpoc + bin ≤ min(O,C)`) | nejkladnější delta, `dpoc > max(O,C)` |
-
-- POC se počítá z footprintu v USD notional pro biny 5/10/25/50/100 (`vpoc_<b>`, `dpoc_neg_<b>`, `dpoc_pos_<b>`
-  ve svíčkách); bin pro detektor se volí v UI (default 25 = default zobrazení, `detector.poc_bin`).
-  Při shodě objemu rozhoduje nižší úroveň. Když svíčka nemá žádnou úroveň se zápornou (kladnou) deltou,
-  P2 pro long (short) nesplněna.
-- Signál = svíčka je platná a z **zapnutých** podmínek (zaškrtávátka V1 V2 D1 D2 P1 P2) je splněno aspoň
-  „min. splněných“ (`detector.conditions`, `detector.min_true`, null = všechny). Default V1–D2, všechny →
-  stejné signály jako dřív. Panel svíčky ukazuje u každé podmínky ✔/✘ s čísly a „x/y zapnutých, potřeba k“;
-  nezapnuté podmínky jsou zašedlé, ale vyhodnocené.
-
-Okrajové případy: nulový knot → podíl 0, nesplněno; SellVol = 0 (BuyVol = 0) → D2 nesplněna;
-H = L → svíčka se přeskočí (`valid = false`); dokud není N předchozích svíček, z = null → V1 nesplněna.
-Rolling okno běží přes hranice dnů. `rel_tod` (objem / medián objemu ve stejném UTC čase za
-předchozích 20 dní) je null, dokud neexistuje všech 20 předchozích hodnot.
+Okrajové případy: nulový knot → podíl 0; SellVol = 0 (BuyVol = 0) → podíl null; H = L → `valid = false`;
+dokud není N předchozích svíček, z = null. Rolling okno běží přes hranice dnů. `rel_tod` (objem / medián
+objemu ve stejném NY čase za předchozích 20 dní) je null, dokud neexistuje všech 20 předchozích hodnot.
 
 Uložené sloupce (`data/derived/series`): OHLC, volume/buy/sell v BTC i USD, delta, CVD, trades,
 start/end/duration, `d_oi`, `d_oi_usd`, `z`, `rel_tod`, `color`, `close_pos`, `delta_ratio`,
 surové složky obou knotů `{lw,uw}_{vol,buy,sell}[_usd]`, `lw_share`, `lw_range`, `lw_conc`,
-`lw_delta_usd`, `lw_delta_ratio`, `lw_sell_share` (zrcadlově `uw_*`, `uw_buy_share`), podmínky
-`L_V1…L_D2`, `S_V1…S_D2` a `long_signal`, `short_signal`.
+`lw_delta_usd`, `lw_delta_ratio`, `lw_sell_share` (zrcadlově `uw_*`, `uw_buy_share`), POC a metriky.
 
 ### Známé případy 2026-10-08 (M5)
 - **Svíčka A = 12:50 UTC** (08:50 New York EDT, 14:50 Praha): O 82 204,2 H 82 384,9 L 81 849,2 C 82 267,3,
-  objem 462,0M USD, delta −99,2M. **Long signál**: z = 4,35, V2 = 0,768, Δ(K) = −123,0M, D2 = 0,852.
+  objem 462,0M USD, delta −99,2M; z = 4,35, Vol(K)/Vol = 0,768, Δ(K) = −123,0M, SellVol(K)/SellVol = 0,852.
 - Tři svíčky po A: delta +10,3M, −1,5M, +12,9M (znaménka sedí s referencí).
-- **Svíčka B = 13:40 UTC** (09:40 New York): objem 370,9M, delta −47,0M, low 81 715,0. **Detektor spouští long**:
-  z = 2,83, V2 = 0,783, Δ(K) = −54,4M, D2 = 0,825.
+- **Svíčka B = 13:40 UTC** (09:40 New York): objem 370,9M, delta −47,0M, low 81 715,0;
+  z = 2,83, Vol(K)/Vol = 0,783, Δ(K) = −54,4M, SellVol(K)/SellVol = 0,825.
 - Časové pásmo screenshotu nelze z dat ověřit (screenshot není k dispozici); svíčky jsou nalezené
   podle hodnot, ne podle času.
 
@@ -206,7 +194,7 @@ surové složky obou knotů `{lw,uw}_{vol,buy,sell}[_usd]`, `lw_share`, `lw_rang
   takže letní/zimní čas se řeší automaticky. V roce 2026: EDT (UTC−4) od 8. 3., EST (UTC−5) od 1. 11.
   Pozor: Evropa přechází jindy (25. 10.), rozdíl NY–Praha je proto týden v roce 5 h místo 6 h.
 - Zarovnání svíček (M1/M5/M15) se DST nemění, posun NY je vždy celé hodiny.
-- `rel_tod` (objem vůči stejnému času dne) porovnává **lokální NY čas** (`detector.tod_timezone`),
+- `rel_tod` (objem vůči stejnému času dne) porovnává **lokální NY čas** (`features.tod_timezone`),
   aby US session zůstávala na stejném místě i přes přechod času. V den přechodu na zimní čas
   existuje hodina 01:00–02:00 dvakrát; obě svíčky se porovnávají se stejnou historií.
 - Reset CVD je podle zadání v 00:00 UTC; lze přepnout `aggregation.cvd_reset_timezone: America/New_York`.
@@ -224,20 +212,19 @@ surové složky obou knotů `{lw,uw}_{vol,buy,sell}[_usd]`, `lw_share`, `lw_rang
 
 `python -m fp serve` → http://localhost:8000. Backend FastAPI čte `data/derived/series` a `data/derived/footprint`
 (per-day parquet s LRU cache v paměti), odpovědi jsou sloupcové JSON s gzipem. Frontend je vanilla JS + Canvas 2D
-bez build kroku (`fp/static/`).
+bez build kroku (`fp/static/`); texty rozhraní v češtině i angličtině (`fp/static/i18n.js`).
 
 API:
 | endpoint | popis |
 |---|---|
-| `GET /api/meta` | dostupné agregace a rozsah dnů, parametry detektoru, časové pásmo, biny |
-| `GET /api/candles?agg=5m&start=ms&end=ms&pad=N[&full=1]` | svíčky se `start_ts` v [start, end) + `pad` svíček před `start`; default lehké sloupce (graf + detektor), `full=1` všechny |
+| `GET /api/meta` | dostupné agregace a rozsah dnů, parametry features, časové pásmo, biny |
+| `GET /api/candles?agg=5m&start=ms&end=ms&pad=N[&full=1]` | svíčky se `start_ts` v [start, end) + `pad` svíček před `start`; default lehké sloupce (graf, tabulka, tooltip), `full=1` všechny |
 | `GET /api/candle?agg&cid&start_ts` | všechny sloupce jedné svíčky (detail v panelu) |
 | `GET /api/periods?start&end&tz&bin` | sessions a dny v rozsahu: high/low, volume a delta profil (z 5m dat) |
-| `POST /api/export` | signály z prohlížeče → CSV se všemi features ze serveru |
 | `GET /api/footprint?agg=5m&start=ms&end=ms` | footprint v základním binu 5 USD; prohlížeč re-agreguje na 10/25/50/100 |
 
-Líné načítání: prohlížeč stahuje svíčky po UTC dnech podle viditelného rozsahu a vždy drží aspoň N + 20 svíček
-vlevo od okraje (z-score se počítá v prohlížeči). Footprint se stahuje jen pro viditelné dny a jen když je
+Líné načítání: prohlížeč stahuje svíčky po UTC dnech podle viditelného rozsahu a drží aspoň 20 svíček
+vlevo od okraje. Footprint se stahuje jen pro viditelné dny a jen když je
 přiblížení dost velké na buňky; dny dál než 3 dny od pohledu se z paměti uvolní.
 
 Ovládání:
@@ -249,14 +236,15 @@ Ovládání:
   vyhlazenou křivku rozložení celkového objemu (buy + sell) po cenových úrovních aktuálního binu, normovanou
   na maximum svíčky; tečka = POC (úroveň s největším objemem). Zobrazuje se v režimu buněk (při dostatečném
   přiblížení), ve všech režimech buňky (delta / sell × buy / volume),
+- **CZ / EN**: přepínač jazyka rozhraní (pamatuje si ho prohlížeč),
 - **☀ Světlý / ☾ Tmavý**: přepínač režimu celého rozhraní (pamatuje si ho prohlížeč). Světlý režim má krémové
   pozadí `#f8f4e4` a vlastní paletu: tmavší zelená/červená, volume profil tmavě oranžový (žlutá by na světlém
   pozadí zanikla), delta profil sytě fialový, slabší výplně buněk a tmavý text,
 - **Δ Profil** (vlastní tlačítko On/Off, fialová): u každé svíčky křivka delty (buy − sell) po cenových
   úrovních kolem svislé nulové osy uprostřed buňky – doprava převaha nákupů, doleva prodejů – normovaná na
   max |delta| svíčky; tečka = úroveň s největší |delta|. Lze zapnout samostatně i spolu s volume profilem.
-- klik na svíčku = boční panel se všemi features a podmínkami V1/V2/D1/D2 (✔/✘ s čísly) a čárkované hranice
-  knotu na min(O,C) (L, zelená) a max(O,C) (S, červená) se štítky na cenové ose,
+- klik na svíčku = boční panel se všemi features a metrikami, čárkované hranice knotu na min(O,C) (L, zelená)
+  a max(O,C) (S, červená) a orámované POC buckety v binu zobrazení, vše se štítky na cenové ose,
 - režimy buňky: delta (default), sell × buy (levá půlka sell, pravá buy), volume,
 - úrovně detailu: buňky s čísly → při oddálení jen barevné buňky → jen svíčky,
 - barva buňky: intenzita podle |hodnoty| vůči 95. percentilu viditelných buněk, hodnoty pod 12 % bez výplně,
@@ -264,12 +252,10 @@ Ovládání:
 - **Vrstvy ▾**: on/off pásy sessions, high/low, volume a delta profil sessions a dnů (sessions v `config.yaml`,
   default NY čas Asia 18–03, London 03–08, New York 08–17; den = kalendářní den ve zvoleném pásmu),
 - rozsah „Od – Do“ + **Načíst** (dny ve zvoleném pásmu) / **Vše** (celý dataset): načte všechny svíčky rozsahu
-  a zobrazí ho celý; signály a export pak platí pro celý rozsah. Limit 150 000 svíček (celý rok M5, M15 a
+  a zobrazí ho celý. Limit 150 000 svíček (celý rok M5, M15 a
   objemové svíčky ano, M1 max ~100 dní). Při velkém oddálení se svíčky slučují po pixelech,
 - tabulka pod footprintem: Volume, CVD, Delta (USD), Trades, OI Δ; panel ΔOI s přepínačem BTC/USD.
-  ΔOI je prázdné u svíček bez hranice 5min snapshotu (M1, objemové svíčky),
-- detektor: N, práh z, V2, D2, long/short; přepočet v prohlížeči z uložených features, počet signálů v načteném
-  rozsahu a export signálů s features do CSV.
+  ΔOI je prázdné u svíček bez hranice 5min snapshotu (M1, objemové svíčky).
 
 Server posílá UI soubory s `Cache-Control: no-cache` (prohlížeč se vždy zeptá, nezměněné soubory jdou jako
 304), takže po aktualizaci kódu stačí obyčejné obnovení stránky.
@@ -293,10 +279,10 @@ Výkon (Chrome, 1600×900): vykreslení snímku ~1–3 ms, přepnutí binu bez d
 - `cid` = pořadové číslo svíčky (u časových svíček `cid = start_ts`); je to unikátní klíč, protože
   dvě objemové svíčky mohou začínat stejným obchodem.
 - ΔOI: jen u svíček, do jejichž intervalu (první, poslední obchod] spadá hranice 5min snapshotu.
-- **Detektor (experimentální):** V1 = zrychlení toku objemu: −ln(čas posledních W svíček,
+- **z-score (experimentální):** `z` = zrychlení toku objemu: −ln(čas posledních W svíček,
   od uzavření t−W do uzavření t) jako z-score vůči N dřívějším stejně dlouhým oknům, která skončila před
-  začátkem aktuálního okna (W = `detector.vol_window`, default 10). Reaguje se zpožděním – viz metodika.md.
-  V2/D1/D2 beze změny.
+  začátkem aktuálního okna (W = `features.vol_window`, default 10). Reaguje se zpožděním – viz metodika.md.
+  Features knotů beze změny.
 - **Vlastní práh z UI** („Vlastní práh…“): server spočítá svíčky na pozadí přes všechny dny (UI ukazuje
   průběh, ~0,2 s/den) a uloží je na disk; další otevření je okamžité a `fp build` je pak udržuje
   aktuální spolu s ostatními. Povolený rozsah: 1M–100B USD, 10–1M BTC.
@@ -313,22 +299,17 @@ Shrnutí definic a rozhodnutí, která ovlivňují výsledky. Parametry jsou v `
   Časové metriky uvnitř svíčky mají stejnou nepřesnost (≤ 100 ms).
 - Interně UTC, zobrazení America/New_York (DST). OI snapshot `create_time = T` platí pro T + 5 min.
 
-### Knot a detektor
+### Knot, z-score a POC
 - Spodní knot = obchody s cenou **striktně pod** min(O, C), horní = striktně nad max(O, C); počítá se
   z jednotlivých aggTrades, ne z footprint binů. Podíly v USD notional.
-- V1: z-score ln(Vol_USD) přes N předchozích svíček (bez aktuální, výběrová std). Objemové svíčky:
-  rychlost okna posledních W svíček vs N dřívějších nepřekrývajících se oken, **experimentální**. Rolling okno běží přes hranice dnů; v prohlížeči slouží
-  prvních N načtených svíček jako rozjezd.
-- P1 („volume POC v knotu“) je **přísná**: celý POC bucket musí ležet v knotu (`vpoc + bin ≤ min(O,C)`,
-  u shortu `vpoc > max(O,C)`). Volnější varianta (jen střed bucketu) by dávala víc signálů.
-- P2: **delta POC je stranově specifický** – pro long úroveň s nejzápornější deltou (kde prodávající
-  tlačili nejvíc), pro short s nejkladnější – a jeho bucket musí ležet celý v knotu (bez vazby na volume
-  POC). Δ profil ve vieweru ukazuje oba delta POC (červená / zelená tečka).
-- **POC bin** je volitelný (5/10/25/50/100, default 25) – P1/P2 se mohou mezi biny lišit. Shoda objemu ⇒
-  nižší úroveň.
-- Signál = platná svíčka (H > L) a z zapnutých podmínek je splněno aspoň „min. splněných“.
+- z-score ln(Vol_USD) přes N předchozích svíček (bez aktuální, výběrová std). Objemové svíčky:
+  rychlost okna posledních W svíček vs N dřívějších nepřekrývajících se oken, **experimentální**. Rolling
+  okno běží přes hranice dnů.
+- **Delta POC je stranově specifický** – `dpoc_neg` = úroveň s nejzápornější deltou (kde prodávající
+  tlačili nejvíc), `dpoc_pos` s nejkladnější. Δ profil ve vieweru ukazuje oba (červená / zelená tečka).
+- POC se ukládá pro biny 5/10/25/50/100; shoda objemu ⇒ nižší úroveň.
 
-### Metriky uvnitř svíčky (`fp/metrics.py`, sekce v panelu svíčky, sloupce v exportu)
+### Metriky uvnitř svíčky (`fp/metrics.py`, sekce v panelu svíčky, sloupce v series)
 | metrika | definice | proč (absorpce) |
 |---|---|---|
 | průběh delty | kumulativní delta (USD) obchod po obchodu; `dpath_min/max`, návrat od minima `delta − min` a jeho poměr k \|min\| (long), pokles od maxima (short); kdy během svíčky vzniklo low/high a min/max delty (podíl trvání) | velká záporná delta do low, která se otočí = prodeje pohlceny |

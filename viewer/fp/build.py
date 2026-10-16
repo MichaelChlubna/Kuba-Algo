@@ -12,7 +12,7 @@ from .convert import CONVERTERS, convert_day, parquet_path
 from .download import date_range
 from .footprint import footprint, poc_features
 from .metrics import add_candle_metrics, add_oi_vol_ratio
-from .features import DEFAULT_CONDITIONS, add_oi_delta, add_rolling, add_tod_relative, detect, static_features, wick_components
+from .features import add_oi_delta, add_rolling, add_tod_relative, static_features, wick_components
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ def load_oi(cfg: dict) -> pl.DataFrame:
 
 
 def finalize(cfg: dict, agg: str, volume_bars: bool = False) -> pl.DataFrame:
-    """Range-level stage over all built days: CVD, ΔOI, rolling z, time-of-day volume, default signals."""
+    """Range-level stage over all built days: CVD, ΔOI, rolling z, time-of-day volume."""
     days = available_days(cfg, "candles", agg)
     if not days:
         return pl.DataFrame()
@@ -94,21 +94,17 @@ def finalize(cfg: dict, agg: str, volume_bars: bool = False) -> pl.DataFrame:
     if "cid" not in df.columns:   # unique, monotonic candle key: start_ts for time candles, sequence for volume candles
         df = df.with_columns(cid=pl.col("start_ts"))
     df = df.sort("cid")
-    dcfg = cfg["detector"]
+    fcfg = cfg["features"]
     acfg = cfg["aggregation"]
     df = add_cvd(df, acfg.get("cvd_reset", "daily"), acfg.get("cvd_reset_timezone", "UTC"))
     df = add_oi_vol_ratio(add_oi_delta(df, load_oi(cfg)))
-    df = add_rolling(df, dcfg["n"], volume_bars=volume_bars, window=dcfg.get("vol_window", 10))
+    df = add_rolling(df, fcfg["n"], volume_bars=volume_bars, window=fcfg.get("vol_window", 10))
     if not volume_bars:
-        df = add_tod_relative(df, dcfg.get("tod_days", 20), dcfg.get("tod_timezone", "America/New_York"))
-    df = detect(df, dcfg["z_min"], dcfg["v2_min"], dcfg["d2_min"], dcfg.get("long", True), dcfg.get("short", True),
-                conditions=dcfg.get("conditions", DEFAULT_CONDITIONS), min_true=dcfg.get("min_true"),
-                poc_bin=dcfg.get("poc_bin", 25))
+        df = add_tod_relative(df, fcfg.get("tod_days", 20), fcfg.get("tod_timezone", "America/New_York"))
     df = df.with_columns(day=pl.from_epoch("start_ts", time_unit="ms").dt.date())
     for (day,), part in df.group_by("day"):
         _write(part.drop("day").sort("cid"), derived_path(cfg, "series", agg, day))
-    log.info("finalized %s: %d candles, %d long / %d short signals", agg, df.height,
-             df["long_signal"].sum(), df["short_signal"].sum())
+    log.info("finalized %s: %d candles", agg, df.height)
     return df
 
 
