@@ -46,8 +46,10 @@ def time_footprint(trades: pl.DataFrame, period: int, bin_usd: int) -> pl.DataFr
 
 def build_day(cfg: dict, day: dt.date, force: bool = False) -> bool:
     """Per-day stage. Returns True if anything was (re)built."""
-    for ds in CONVERTERS:
-        convert_day(cfg, ds, day, force=force)
+    from .sample import sample_marker
+    if not sample_marker(cfg).exists():   # sample data has no raw zips
+        for ds in CONVERTERS:
+            convert_day(cfg, ds, day, force=force)
     trades, changed = None, False
     base_bin = cfg["aggregation"]["base_bin"]
     for tf in cfg["aggregation"]["timeframes"]:

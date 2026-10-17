@@ -1,0 +1,77 @@
+@import 'tailwindcss';
+
+/* Theme tokens (dark default, light = cream). Canvas colors are in chart/themes.ts. */
+:root, :root[data-theme='dark'] {
+  --bg: #0e1015; --panel: #151820; --line: #262b36; --text: #c9ced8; --dim: #7a8292; --strong: #ffffff;
+  --green: #26a65b; --red: #e04848; --accent: #4c8dff; --ctrl-bg: #1d212b; --ctrl-hover: #3a4150;
+  --seg-on-bg: #2a3550; --seg-on-line: #3b4a6e; --seg-on-text: #ffffff;
+  --vp-on-bg: #4a3a12; --vp-on-line: #b8862a; --vp-on-text: #ffd27a;
+  --dp-on-bg: #3a2452; --dp-on-line: #9b6bd6; --dp-on-text: #e2c8ff;
+  --tip-bg: rgba(20, 23, 31, 0.95); --tip-line: #333a48; --help: #4a5162;
+  color-scheme: dark;
+}
+:root[data-theme='light'] {
+  --bg: #f8f4e4; --panel: #f0ead5; --line: #ddd4b9; --text: #2b2a26; --dim: #77705a; --strong: #1d1c19;
+  --green: #188c46; --red: #ce3434; --accent: #2c68cc; --ctrl-bg: #fbf8ed; --ctrl-hover: #b9ae8c;
+  --seg-on-bg: #dfe6f3; --seg-on-line: #8fa3c8; --seg-on-text: #1d2a44;
+  --vp-on-bg: #f6dfb8; --vp-on-line: #c46200; --vp-on-text: #6b3500;
+  --dp-on-bg: #e7dcf8; --dp-on-line: #7634d6; --dp-on-text: #3d1680;
+  --tip-bg: rgba(251, 248, 237, 0.97); --tip-line: #cfc5a6; --help: #a69e85;
+  color-scheme: light;
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-dim: var(--dim);
+  --color-strong: var(--strong);
+  --color-pos: var(--green);
+  --color-neg: var(--red);
+  --color-accent: var(--accent);
+  --color-ctrl: var(--ctrl-bg);
+  --color-help: var(--help);
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'DejaVu Sans Mono', monospace;
+}
+
+@layer base {
+  html, body, #root { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; overflow: hidden; }
+  select, input, button {
+    background: var(--ctrl-bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+    padding: 3px 6px; font: inherit;
+  }
+  button { cursor: pointer; }
+  button:hover, select:hover { border-color: var(--ctrl-hover); }
+  input[type='color'] { padding: 0 2px; width: 34px; height: 24px; }
+}
+
+@layer components {
+  .seg { display: inline-flex; }
+  .seg > button { border-radius: 0; }
+  .seg > button:first-child { border-radius: 4px 0 0 4px; }
+  .seg > button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+  .seg > button.on, .btn-on { background: var(--seg-on-bg); border-color: var(--seg-on-line); color: var(--seg-on-text); }
+  .toggle-vp.on { background: var(--vp-on-bg); border-color: var(--vp-on-line); color: var(--vp-on-text); }
+  .toggle-dp.on { background: var(--dp-on-bg); border-color: var(--dp-on-line); color: var(--dp-on-text); }
+  .pop {
+    position: absolute; top: calc(100% + 4px); z-index: 30; min-width: 260px; padding: 8px 10px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .pop-h { color: var(--text); font-weight: 600; margin-top: 4px; }
+  .chk { display: flex; align-items: center; gap: 6px; color: var(--text); cursor: pointer; }
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--tip-bg); border: 1px solid var(--tip-line); border-radius: 4px;
+    padding: 6px 8px; font: 12px/1.45 var(--font-mono); white-space: pre; color: var(--text); z-index: 5;
+  }
+  table.kv { width: 100%; border-collapse: collapse; font: 12px/1.5 var(--font-mono); }
+  table.kv td { padding: 1px 2px; vertical-align: top; }
+  table.kv td:first-child { color: var(--dim); }
+  table.kv td:not(:first-child) { text-align: right; }
+  table.kv tr.hd td { color: var(--dim); border-bottom: 1px solid var(--line); }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .side h3 { font-size: 12px; margin: 10px 0 2px; color: var(--text); font-weight: 600; }
+}

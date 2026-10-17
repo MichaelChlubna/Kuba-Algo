@@ -1,0 +1,132 @@
+// UI strings (cs / en). t(key, ...args): plain strings, or functions taking the interpolated values.
+type Arg = string | number;
+type Entry = string | ((...args: Arg[]) => string);
+
+const cs = {
+  // toolbar, layers, help (static HTML)
+  agg: 'Agregace', threshold: 'práh', cell: 'Buňka', from: 'Od', to: 'Do',
+  load: 'Načíst', load_tt: 'Načíst celý rozsah (dny v zobrazeném časovém pásmu) a zobrazit ho celý',
+  all: 'Vše', all_tt: 'Načíst celý dostupný dataset',
+  layers: 'Vrstvy ▾', layers_tt: 'Sessions a dny: pásy, high/low, volume a delta profil',
+  sess_bands: 'pásy sessions', vprofile: 'volume profil', dprofile: 'delta profil', days: 'Dny',
+  layers_note: 'Profily v aktuálním binu; volume profil od začátku období, delta profil u jeho konce.',
+  profile: 'Profil', profile_tt: 'Volume profile každé svíčky (On/Off)',
+  dprofile_btn: 'Δ Profil', dprofile_tt: 'Delta profile každé svíčky (On/Off)',
+  oi_tt: 'Jednotky ΔOI', theme_tt: 'Přepnout tmavý / světlý režim', lang_tt: 'Jazyk',
+  help: 'kolečko = zoom čas · Ctrl/Shift + kolečko = zoom cena · tažení osy = škálování (cenová ↕, časová ↔) · tažení = posun · dvojklik = reset (na ose jen té osy) · klik = detail svíčky',
+  candle: 'Svíčka', click_candle: 'Klikni na svíčku.',
+  // dynamic
+  theme_light: '☀ Světlý', theme_dark: '☾ Tmavý', custom_threshold: 'Vlastní práh…',
+  day_def: '(kalendářní den ve zvoleném pásmu)',
+  loading: 'Načítám…', loading_detail: 'Načítám detail…',
+  err: 'Chyba: ', err_load: 'Chyba načítání: ', err_fp: 'Chyba footprintu: ', err_periods: 'Chyba sessions/dnů: ',
+  err_detail: 'Chyba detailu: ', err_build: (agg: Arg, e: Arg) => `Chyba výpočtu ${agg}: ${e}`,
+  no_data: 'Žádná data – spusť fp sample nebo fp update (viz README)',
+  computing: (agg: Arg, done: Arg, total: Arg) => `Počítám ${agg}: ${done}/${total} dní…`,
+  mode_text: 'buňky + čísla', mode_cells: 'buňky', mode_candles: 'jen svíčky',
+  range_too_big: (agg: Arg, est: Arg, lim: Arg, maxDays: Arg) => `Rozsah je pro ${agg} moc velký (~${est} svíček, limit ${lim}); zvol max ~${maxDays} dní nebo hrubší agregaci.`,
+  range_too_big_agg: (from: Arg, to: Arg, agg: Arg, est: Arg, lim: Arg) => `Rozsah ${from} … ${to} je pro ${agg} moc velký (~${est} svíček, limit ${lim}) – zobrazen výřez kolem středu, další data se dočítají při posunu.`,
+  loading_range: (agg: Arg, from: Arg, to: Arg, done: Arg, total: Arg) => `Načítám ${agg} ${from} … ${to}: ${done}/${total}`,
+  // tooltip + candle detail
+  no_snapshot: '— (bez snapshotu)', oi_no_boundary: '— (žádná hranice 5min snapshotu)',
+  short_history: 'n/a (málo historie)', short_history_dash: '— (málo historie)',
+  z_speed: (w: Arg) => `z rychlosti ${w} svíček`,
+  green: 'zelená', red: 'červená', color_close: 'Barva · close pos', rel_tod: 'Vol / medián času dne',
+  lower_wick: 'Spodní knot (long)', upper_wick: 'Horní knot (short)',
+  vol_share: 'podíl objemu', range_share: 'podíl na range', conc: 'koncentrace',
+  sell_in_wick: 'sell v knotu / sell', buy_in_wick: 'buy v knotu / buy',
+  // intra-candle metrics
+  delta_path: 'Průběh delty uvnitř svíčky', cum_delta: 'min / max kum. delta',
+  recov_long: 'návrat od min (long)', recov_short: 'pokles od max (short)',
+  t_lowhigh: 'low / high v čase', t_dminmax: 'min / max delty v čase',
+  extremes: (b: Arg) => `Extrémy (${b} USD bucket)`,
+  auction_low: 'aukce low: buy / sell', auction_high: 'aukce high: buy / sell',
+  finished: 'dokončená', unfinished: 'nedokončená',
+  exh_low: 'vyčerpání low: 1 / 2 buckety vs POC', exh_high: 'vyčerpání high: 1 / 2 buckety vs POC',
+  wicks: 'Knoty', lower: 'spodní', upper: 'horní',
+  effort: 'úsilí: USD / 1 USD pohybu', vs_body: '… vs tělo',
+  big_trades: (b: Arg) => `velké obchody ≥${b} BTC`, big_against: '… velké proti směru',
+  avg_trade: 'prům. obchod', trade_rate: 'obchody / s', time_in_wick: 'čas v knotu',
+  body_line: (avg: Arg, rate: Arg, eff: Arg) => `tělo: prům. obchod ${avg}, ${rate} obchodů/s, úsilí ${eff}`,
+
+  // web version
+  settings: 'Nastavení', settings_tt: 'Barvy, prahy imbalancí, rozložení', close: 'Zavřít', reset: 'Výchozí',
+  colors: 'Barvy', c_green: 'nákupy / růst', c_red: 'prodeje / pokles', c_blue: 'objem', c_vprof: 'volume profil', c_dprof: 'delta profil', c_vwap: 'VWAP',
+  imb: 'Imbalance', imb_tt: 'Zvýraznit diagonální imbalance v buňkách (On/Off)', imb_show: 'zvýraznit v buňkách',
+  imb_ratio: 'poměr (%)', imb_min: 'min. objem na úrovni (USD)', imb_stack: 'stacked: min. úrovní',
+  imb_note: 'buy(L) ≥ poměr × sell(L − bin), sell(L) ≥ poměr × buy(L + bin), v binu zobrazení.',
+  layout: 'Rozložení', show_side: 'boční panel detailu', show_table: 'tabulka pod grafem', show_oi: 'panel ΔOI',
+  vwap_day: 'VWAP (den)', rvp: 'profil viditelného rozsahu', rvp_short: 'Profil rozsahu', overlays: 'Překryvy',
+  ticks: 'ticků', unit_tick: 'ticky', custom_tick_note: 'tick = 1 aggTrade',
+  sample_badge: 'vzorová data', sample_tt: 'Syntetická vzorová data (fp sample), ne skutečná data Binance',
+  too_many_jobs: 'Už se počítá jiný práh, zkus to za chvíli.',
+  detail_hide: 'Skrýt panel', detail_show: 'Detail',
+  of_volume: 'objemu', oi_falling: 'OI klesá: zavírání pozic / likvidace', oi_rising: 'OI roste: otevírání nových pozic',
+};
+
+const en: Partial<Record<keyof typeof cs, Entry>> = {
+  agg: 'Aggregation', threshold: 'threshold', cell: 'Cell', from: 'From', to: 'To',
+  load: 'Load', load_tt: 'Load the whole range (days in the displayed time zone) and fit it to the view',
+  all: 'All', all_tt: 'Load the whole available dataset',
+  layers: 'Layers ▾', layers_tt: 'Sessions and days: bands, high/low, volume and delta profile',
+  sess_bands: 'session bands', vprofile: 'volume profile', dprofile: 'delta profile', days: 'Days',
+  layers_note: 'Profiles at the current bin; volume profile from the period start, delta profile at its end.',
+  profile: 'Profile', profile_tt: 'Volume profile of each candle (On/Off)',
+  dprofile_btn: 'Δ Profile', dprofile_tt: 'Delta profile of each candle (On/Off)',
+  oi_tt: 'ΔOI units', theme_tt: 'Toggle dark / light mode', lang_tt: 'Language',
+  help: 'wheel = zoom time · Ctrl/Shift + wheel = zoom price · drag an axis = scale (price ↕, time ↔) · drag = pan · double-click = reset (on an axis: that axis only) · click = candle detail',
+  candle: 'Candle', click_candle: 'Click a candle.',
+  theme_light: '☀ Light', theme_dark: '☾ Dark', custom_threshold: 'Custom threshold…',
+  day_def: '(calendar day in the selected time zone)',
+  loading: 'Loading…', loading_detail: 'Loading detail…',
+  err: 'Error: ', err_load: 'Loading error: ', err_fp: 'Footprint error: ', err_periods: 'Sessions/days error: ',
+  err_detail: 'Detail error: ', err_build: (agg: Arg, e: Arg) => `Building ${agg} failed: ${e}`,
+  no_data: 'No data – run fp sample or fp update (see README)',
+  computing: (agg: Arg, done: Arg, total: Arg) => `Computing ${agg}: ${done}/${total} days…`,
+  mode_text: 'cells + numbers', mode_cells: 'cells', mode_candles: 'candles only',
+  range_too_big: (agg: Arg, est: Arg, lim: Arg, maxDays: Arg) => `Range is too large for ${agg} (~${est} candles, limit ${lim}); pick at most ~${maxDays} days or a coarser aggregation.`,
+  range_too_big_agg: (from: Arg, to: Arg, agg: Arg, est: Arg, lim: Arg) => `Range ${from} … ${to} is too large for ${agg} (~${est} candles, limit ${lim}) – showing a window around the centre, more data loads as you pan.`,
+  loading_range: (agg: Arg, from: Arg, to: Arg, done: Arg, total: Arg) => `Loading ${agg} ${from} … ${to}: ${done}/${total}`,
+  no_snapshot: '— (no snapshot)', oi_no_boundary: '— (no 5-min snapshot boundary)',
+  short_history: 'n/a (not enough history)', short_history_dash: '— (not enough history)',
+  z_speed: (w: Arg) => `z of speed of ${w} candles`,
+  green: 'green', red: 'red', color_close: 'Color · close pos', rel_tod: 'Vol / time-of-day median',
+  lower_wick: 'Lower wick (long)', upper_wick: 'Upper wick (short)',
+  vol_share: 'volume share', range_share: 'share of range', conc: 'concentration',
+  sell_in_wick: 'sell in wick / sell', buy_in_wick: 'buy in wick / buy',
+  delta_path: 'Delta path within the candle', cum_delta: 'min / max cum. delta',
+  recov_long: 'recovery from min (long)', recov_short: 'pullback from max (short)',
+  t_lowhigh: 'low / high in time', t_dminmax: 'delta min / max in time',
+  extremes: (b: Arg) => `Extremes (${b} USD bucket)`,
+  auction_low: 'low auction: buy / sell', auction_high: 'high auction: buy / sell',
+  finished: 'finished', unfinished: 'unfinished',
+  exh_low: 'low exhaustion: 1 / 2 buckets vs POC', exh_high: 'high exhaustion: 1 / 2 buckets vs POC',
+  wicks: 'Wicks', lower: 'lower', upper: 'upper',
+  effort: 'effort: USD per 1 USD move', vs_body: '… vs body',
+  big_trades: (b: Arg) => `large trades ≥${b} BTC`, big_against: '… large against direction',
+  avg_trade: 'avg trade', trade_rate: 'trades / s', time_in_wick: 'time in wick',
+  body_line: (avg: Arg, rate: Arg, eff: Arg) => `body: avg trade ${avg}, ${rate} trades/s, effort ${eff}`,
+  settings: 'Settings', settings_tt: 'Colors, imbalance thresholds, layout', close: 'Close', reset: 'Defaults',
+  colors: 'Colors', c_green: 'buys / up', c_red: 'sells / down', c_blue: 'volume', c_vprof: 'volume profile', c_dprof: 'delta profile', c_vwap: 'VWAP',
+  imb: 'Imbalance', imb_tt: 'Highlight diagonal imbalances in the cells (On/Off)', imb_show: 'highlight in cells',
+  imb_ratio: 'ratio (%)', imb_min: 'min. volume at the level (USD)', imb_stack: 'stacked: min. levels',
+  imb_note: 'buy(L) ≥ ratio × sell(L − bin), sell(L) ≥ ratio × buy(L + bin), at the display bin.',
+  layout: 'Layout', show_side: 'detail side panel', show_table: 'table below the chart', show_oi: 'ΔOI panel',
+  vwap_day: 'VWAP (day)', rvp: 'visible range profile', rvp_short: 'Range profile', overlays: 'Overlays',
+  ticks: 'ticks', unit_tick: 'ticks', custom_tick_note: 'tick = 1 aggTrade',
+  sample_badge: 'sample data', sample_tt: 'Synthetic sample data (fp sample), not real Binance data',
+  too_many_jobs: 'Another threshold is being computed, try again shortly.',
+  detail_hide: 'Hide panel', detail_show: 'Detail',
+  of_volume: 'of volume', oi_falling: 'OI falling: positions closing / liquidations', oi_rising: 'OI rising: new positions opening',
+};
+
+export type Lang = 'cs' | 'en';
+export type I18nKey = keyof typeof cs;
+const DICT: Record<Lang, Partial<Record<I18nKey, Entry>>> = { cs, en };
+
+export function translate(lang: Lang, key: I18nKey, ...args: Arg[]): string {
+  const v = (DICT[lang][key] ?? cs[key]) as Entry;
+  return typeof v === 'function' ? v(...args) : v;
+}
+
+export const numLocale = (lang: Lang) => (lang === 'cs' ? 'cs-CZ' : 'en-US');

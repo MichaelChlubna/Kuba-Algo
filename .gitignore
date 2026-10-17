@@ -1,5 +1,8 @@
-# data (~40 GB, regenerated via start.bat -> 2)
+# data (regenerated: docker compose / fp sample / fp update)
 /data/
+
+# secrets
+.env
 
 # Python
 __pycache__/
@@ -7,3 +10,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
