@@ -14,7 +14,7 @@ def results(tmp_path_factory):
 
 
 def test_golden_set_complete(results):
-    assert NAMES and sorted(results) == NAMES
+    assert NAMES and set(NAMES) <= set(results)   # the web version may add outputs (e.g. tick candles)
 
 
 @pytest.mark.parametrize("name", NAMES)

@@ -38,15 +38,29 @@ def main(argv: list[str] | None = None) -> None:
     sp = sub.add_parser("validate", help="validate candles against official klines and known cases")
     add_range(sp)
 
-    sp = sub.add_parser("serve", help="run local footprint viewer")
+    sp = sub.add_parser("sample", help="write a synthetic sample dataset (no download needed)")
+    sp.add_argument("--days", type=int, default=30, help="number of days ending yesterday (default 30)")
+    sp.add_argument("--no-build", action="store_true")
+
+    sp = sub.add_parser("update", help="download + build the rolling window (retention_days), drop older days")
+    sp.add_argument("--days", type=int, default=None)
+
+    sp = sub.add_parser("schedule", help="run `update` now and then daily at --at (UTC)")
+    sp.add_argument("--days", type=int, default=None)
+    sp.add_argument("--at", default="09:30")
+
+    sp = sub.add_parser("serve", help="run the footprint viewer API")
     sp.add_argument("--host", default=None)
     sp.add_argument("--port", type=int, default=None)
 
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
-    start = getattr(args, "start", None) or _date(str(cfg["download"]["start"]))
-    end = getattr(args, "end", None) or _date(str(cfg["download"]["end"]))
+    from .update import window
+    w0, w1 = window(cfg)   # default range: the rolling window (download.retention_days) ending yesterday
+    d = cfg["download"]
+    start = getattr(args, "start", None) or (_date(str(d["start"])) if d.get("start") else w0)
+    end = getattr(args, "end", None) or (_date(str(d["end"])) if d.get("end") else w1)
 
     if args.cmd == "download":
         from .download import download
@@ -61,6 +75,19 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "validate":
         from .validate import validate
         validate(cfg, start, end)
+    elif args.cmd in ("sample", "update", "schedule"):
+        from .update import schedule, update, window
+        if args.cmd == "sample":
+            from .build import build
+            from .sample import write_sample
+            first, last = window(cfg, args.days)
+            write_sample(cfg, first, last)
+            if not args.no_build:
+                build(cfg, first, last)
+        elif args.cmd == "update":
+            update(cfg, args.days)
+        else:
+            schedule(cfg, args.at, args.days)
     elif args.cmd == "serve":
         from .server import serve
         serve(cfg, host=args.host, port=args.port)

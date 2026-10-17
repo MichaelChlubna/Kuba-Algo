@@ -70,3 +70,18 @@ def test_names():
     assert agg_name("btc", 2.5) == "vbtc_2.5"
     assert parse_agg("vusd_100000000") == ("usd", 1e8)
     assert parse_agg("5m") is None
+
+
+def test_tick_candles_count_aggtrades_and_carry_state():
+    t = make_trades([(i, 100.0 + i, 1.0 + i, i % 2 == 0, 2) for i in range(7)])
+    _, st, c = run(t, "tick", 3)
+    assert agg_name("tick", 3) == "vtick_3" and parse_agg("vtick_3") == ("tick", 3.0)
+    assert c.height == 2 and c["agg_trades"].to_list() == [3, 3]
+    assert c["volume"].to_list() == pytest.approx([1 + 2 + 3, 4 + 5 + 6])   # never split
+    assert c["trades"].to_list() == [6, 6]
+    assert c["open"].to_list() == [100.0, 103.0] and c["close"].to_list() == [102.0, 105.0]
+    assert st.acc == 1 and st.next_id == 2 and st.carry.height == 1
+    t2 = make_trades([(10, 200.0, 1.0, False), (11, 201.0, 1.0, True)])
+    _, st2, c2 = run(t2, "tick", 3, st)
+    assert c2["cid"].to_list() == [2] and c2["open"][0] == 106.0 and c2["close"][0] == 201.0
+    assert st2.acc == 0 and st2.next_id == 3

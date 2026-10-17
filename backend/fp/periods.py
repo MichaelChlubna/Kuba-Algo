@@ -87,3 +87,33 @@ def day_range(start_ms: int, end_ms: int, pad_days: int = 1) -> list[dt.date]:
     d0 = dt.datetime.fromtimestamp(start_ms / 1000, dt.timezone.utc).date() - dt.timedelta(days=pad_days)
     d1 = dt.datetime.fromtimestamp((end_ms - 1) / 1000, dt.timezone.utc).date() + dt.timedelta(days=pad_days)
     return [d0 + dt.timedelta(days=i) for i in range((d1 - d0).days + 1)]
+
+
+def range_profile(fp: pl.DataFrame, bin_usd: int, value_area: float = 0.70) -> tuple[pl.DataFrame, dict]:
+    """Volume profile of base-bin footprint rows (level, buy_usd, sell_usd) at bin_usd.
+
+    Returns (levels: level, buy_usd, sell_usd sorted by level, summary: poc, vah, val, volume_usd, delta_usd).
+    Value area: start at the POC and repeatedly add the larger neighbouring level (ties: the upper one)
+    until it holds `value_area` of the volume; vah is the upper edge of its top level, val the lower edge.
+    """
+    empty = {"poc": None, "vah": None, "val": None, "volume_usd": 0.0, "delta_usd": 0.0}
+    if fp.is_empty():
+        return pl.DataFrame(schema={"level": pl.Int64, "buy_usd": pl.Float64, "sell_usd": pl.Float64}), empty
+    lv = (fp.with_columns(level=(pl.col("level") // bin_usd) * bin_usd)
+          .group_by("level").agg(pl.col("buy_usd").sum(), pl.col("sell_usd").sum()).sort("level"))
+    levels, vol = lv["level"].to_list(), (lv["buy_usd"] + lv["sell_usd"]).to_list()
+    total = sum(vol)
+    poc = max(range(len(vol)), key=lambda k: (vol[k], -k))   # ties: lowest level
+    lo = hi = poc
+    acc = vol[poc]
+    while acc < value_area * total and (lo > 0 or hi < len(vol) - 1):
+        up = vol[hi + 1] if hi < len(vol) - 1 else -1.0
+        dn = vol[lo - 1] if lo > 0 else -1.0
+        if up >= dn:
+            hi += 1
+            acc += up
+        else:
+            lo -= 1
+            acc += dn
+    return lv, {"poc": levels[poc], "vah": levels[hi] + bin_usd, "val": levels[lo], "volume_usd": total,
+                "delta_usd": float((lv["buy_usd"] - lv["sell_usd"]).sum())}

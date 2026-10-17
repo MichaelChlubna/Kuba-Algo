@@ -1,26 +1,32 @@
-"""Local footprint viewer backend (FastAPI)."""
+"""Footprint viewer backend (FastAPI): JSON API + the built React frontend (frontend/dist)."""
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import logging
+import os
+import secrets
 import threading
 from functools import lru_cache
 from pathlib import Path
 
 import polars as pl
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .build import available_days, build_volume_agg, derived_path
 from .metrics import DEFAULTS as METRIC_DEFAULTS, METRIC_COLS
-from .periods import DEFAULT_SESSIONS, SOURCE_AGG, compute_periods, day_range
+from .footprint import PRICE_TICK
+from .periods import DEFAULT_SESSIONS, SOURCE_AGG, SOURCE_PERIOD_MS, compute_periods, day_range, range_profile
+from .sample import sample_marker
 from .volume_bars import LIMITS, agg_name, is_volume_agg
 
 log = logging.getLogger(__name__)
 
-STATIC = Path(__file__).resolve().parent / "static"
+# built frontend (npm run build); FP_STATIC_DIR overrides (Docker image: /app/static)
+STATIC = Path(os.environ.get("FP_STATIC_DIR") or Path(__file__).resolve().parents[2] / "frontend" / "dist")
 DAY_MS = 86_400_000
 MAX_CANDLES = 20_000      # per request, full columns
 MAX_LIGHT_CANDLES = 250_000  # per request, light columns (range loading)
@@ -74,18 +80,33 @@ def _columnar(df: pl.DataFrame) -> dict:
     return {"n": df.height, "cols": out}
 
 
-def create_app(cfg: dict) -> FastAPI:
+def _basic_auth() -> tuple[str, str] | None:
+    user, pw = os.environ.get("FP_AUTH_USER"), os.environ.get("FP_AUTH_PASSWORD")
+    return (user, pw) if user and pw else None
+
+
+def create_app(cfg: dict, auth: tuple[str, str] | None = None) -> FastAPI:
+    """auth: (user, password) for HTTP Basic auth on everything except /api/health; default from
+    FP_AUTH_USER / FP_AUTH_PASSWORD (unset = no auth, fine on localhost, required on a public server)."""
     app = FastAPI(title="BTCUSDT footprint")
     app.add_middleware(GZipMiddleware, minimum_size=2048)
+    auth = auth or _basic_auth()
+    expected = "Basic " + base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode() if auth else None
 
     @app.middleware("http")
-    async def no_stale_frontend(request, call_next):
-        # the browser must revalidate the UI files (ETag -> cheap 304), otherwise it keeps old versions
+    async def guard(request: Request, call_next):
+        if expected and request.url.path != "/api/health":
+            if not secrets.compare_digest(request.headers.get("authorization", ""), expected):
+                return Response("authentication required", status_code=401,
+                                headers={"WWW-Authenticate": 'Basic realm="footprint"'})
         response = await call_next(request)
-        if request.url.path == "/" or request.url.path.startswith("/static/"):
+        # index.html must be revalidated (new builds); hashed assets can be cached forever
+        path = request.url.path
+        if path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif not path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-cache"
         return response
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     def aggs() -> list[str]:
         root = cfg["paths"]["derived"] / "series"
@@ -108,17 +129,14 @@ def create_app(cfg: dict) -> FastAPI:
         if agg not in aggs():
             raise HTTPException(404, f"aggregation {agg!r} not built")
 
-    @app.get("/")
-    def index():
-        return FileResponse(STATIC / "index.html")
-
-    @app.get("/favicon.ico", include_in_schema=False)
-    def favicon():
-        return Response(status_code=204)
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok", "aggregations": len(aggs()), "sample": sample_marker(cfg).exists()}
 
     @app.get("/api/meta")
     def meta():
         out = {"aggregations": {}, "features": cfg.get("features") or {}, "timezone": cfg["server"].get("timezone", "America/New_York"),
+               "symbol": cfg.get("symbol", "BTCUSDT"), "price_tick": PRICE_TICK, "sample": sample_marker(cfg).exists(),
                "base_bin": cfg["aggregation"]["base_bin"], "bins": [5, 10, 25, 50, 100], "default_bin": 25,
                "volume_usd": cfg["aggregation"].get("volume_usd", []), "volume_btc": cfg["aggregation"].get("volume_btc", []),
                "metrics": {**METRIC_DEFAULTS, **(cfg.get("metrics") or {})}, "metric_cols": METRIC_COLS,
@@ -168,16 +186,34 @@ def create_app(cfg: dict) -> FastAPI:
     def candle(agg: str, cid: int, start_ts: int):
         """All columns of one candle (side panel detail)."""
         check_agg(agg)
-        df = load_range(agg, start_ts, start_ts + 1).filter(pl.col("cid") == cid)
+        df = load_range(agg, start_ts, start_ts + 1)
+        df = df.filter(pl.col("cid") == cid) if df.height else df
         if df.is_empty():
             raise HTTPException(404, "candle not found")
         return JSONResponse(_columnar(df))
 
+    @app.get("/api/profile")
+    def profile(start: int, end: int, bin: int = Query(25, ge=5, le=1000)):
+        """Volume profile of [start, end) (5m footprint, so the range snaps to 5 minutes): levels at `bin`
+        plus POC and the 70 % value area (VAH / VAL)."""
+        if SOURCE_AGG not in aggs():
+            raise HTTPException(404, "5m aggregation not built")
+        if end - start > 400 * DAY_MS:
+            raise HTTPException(413, "range too long")
+        fs = []
+        for d in day_range(start, end, pad_days=0):
+            f = read_day(cfg, "footprint", SOURCE_AGG, d)
+            if f is not None:
+                fs.append(f.filter((pl.col("start_ts") >= start - SOURCE_PERIOD_MS + 1) & (pl.col("start_ts") < end))
+                          .select("level", "buy_usd", "sell_usd"))
+        lv, summary = range_profile(pl.concat(fs) if fs else pl.DataFrame(), bin)
+        return JSONResponse({"levels": _columnar(lv.with_columns(pl.col("buy_usd", "sell_usd").round(0))), **summary})
+
     @app.post("/api/volume")
     def volume(unit: str, value: float):
-        """Build (and cache on disk) volume candles for a custom threshold in the background."""
+        """Build (and cache on disk) volume or tick candles for a custom threshold in the background."""
         if unit not in LIMITS:
-            raise HTTPException(400, "unit must be usd or btc")
+            raise HTTPException(400, "unit must be usd, btc or tick")
         lo, hi = LIMITS[unit]
         if not lo <= value <= hi:
             raise HTTPException(400, f"threshold must be within [{lo:g}, {hi:g}] {unit.upper()}")
@@ -185,6 +221,9 @@ def create_app(cfg: dict) -> FastAPI:
         with jobs_lock:
             if agg in aggs() and jobs.get(agg, {}).get("status") != "running":
                 return {"agg": agg, "status": "done"}
+            busy = [a for a, j in jobs.items() if j.get("status") == "running" and a != agg]
+            if busy:   # one build at a time (CPU / memory bound)
+                raise HTTPException(429, f"another threshold is being computed: {busy[0]}")
             if jobs.get(agg, {}).get("status") != "running":
                 jobs[agg] = {"status": "running", "done": 0, "total": 0}
                 threading.Thread(target=run_job, args=(agg,), daemon=True).start()
@@ -260,6 +299,22 @@ def create_app(cfg: dict) -> FastAPI:
         df = df.with_columns(pl.col("buy_usd", "sell_usd").round(0), pl.col("buy", "sell").round(3))
         return JSONResponse(_columnar(df))
 
+    if STATIC.is_dir() and (STATIC / "index.html").exists():
+        if (STATIC / "assets").is_dir():
+            app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
+
+        @app.get("/{path:path}", include_in_schema=False)
+        def spa(path: str):
+            f = (STATIC / path).resolve()
+            if path and f.is_file() and STATIC.resolve() in f.parents:
+                return FileResponse(f)
+            return FileResponse(STATIC / "index.html")
+    else:
+        @app.get("/", include_in_schema=False)
+        def no_frontend():
+            return Response("frontend not built: run `npm run build` in frontend/ (or use docker compose)",
+                            media_type="text/plain")
+
     return app
 
 
@@ -267,5 +322,7 @@ def serve(cfg: dict, host: str | None = None, port: int | None = None) -> None:
     import uvicorn
     scfg = cfg.get("server", {})
     host, port = host or scfg.get("host", "127.0.0.1"), port or scfg.get("port", 8000)
+    if host not in ("127.0.0.1", "localhost") and not _basic_auth():
+        log.warning("listening on %s without FP_AUTH_USER / FP_AUTH_PASSWORD: anyone who reaches the port can use the API", host)
     print(f"Footprint viewer: http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}")
     uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning")

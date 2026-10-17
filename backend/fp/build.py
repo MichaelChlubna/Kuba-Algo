@@ -130,7 +130,8 @@ def volume_aggs(cfg: dict) -> list[str]:
     """Configured volume aggregations plus custom thresholds already cached on disk."""
     from .volume_bars import agg_name, is_volume_agg
     a = cfg["aggregation"]
-    names = [agg_name("usd", v) for v in a.get("volume_usd", [])] + [agg_name("btc", v) for v in a.get("volume_btc", [])]
+    names = ([agg_name("usd", v) for v in a.get("volume_usd", [])] + [agg_name("btc", v) for v in a.get("volume_btc", [])]
+             + [agg_name("tick", v) for v in a.get("ticks", [])])
     root = cfg["paths"]["derived"] / "candles"
     if root.exists():
         names += [p.name for p in root.iterdir() if p.is_dir() and is_volume_agg(p.name)]

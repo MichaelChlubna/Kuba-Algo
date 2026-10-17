@@ -1,5 +1,8 @@
 """Volume candles: a candle closes when its volume reaches a threshold (USD notional or BTC).
 
+Tick candles (`vtick_<N>`) use the same machinery: a candle closes after N aggTrades (rows of the
+aggTrades dump, not individual trades, so an aggTrade is never split).
+
 The aggTrade that crosses the threshold is split (same price and side); the remainder starts the next
 candle. State (accumulated volume of the open candle, its pieces, next candle id) continues across days.
 
@@ -18,9 +21,9 @@ QTY_SCALE = 1000    # 1 unit = 0.001 BTC
 PRICE_SCALE = 10    # 1 tick = 0.1 USD
 USD_SCALE = QTY_SCALE * PRICE_SCALE  # 1 unit = 0.0001 USD
 
-_NAME = re.compile(r"^v(usd|btc)_(\d+(?:\.\d+)?)$")
+_NAME = re.compile(r"^v(usd|btc|tick)_(\d+(?:\.\d+)?)$")
 
-LIMITS = {"usd": (1e6, 1e11), "btc": (10.0, 1e6)}
+LIMITS = {"usd": (1e6, 1e11), "btc": (10.0, 1e6), "tick": (10.0, 1e7)}
 
 
 def agg_name(unit: str, value: float) -> str:
@@ -38,6 +41,8 @@ def is_volume_agg(name: str) -> bool:
 
 
 def threshold_units(unit: str, value: float) -> int:
+    if unit == "tick":
+        return int(round(value))
     return int(round(value * (USD_SCALE if unit == "usd" else QTY_SCALE)))
 
 
@@ -67,7 +72,7 @@ def split_pieces(trades: pl.DataFrame, unit: str, T: int, state: State) -> tuple
     """
     qty_u = (pl.col("qty") * QTY_SCALE).round(0).cast(pl.Int64)
     price_u = (pl.col("price") * PRICE_SCALE).round(0).cast(pl.Int64)
-    m = qty_u * price_u if unit == "usd" else qty_u
+    m = qty_u * price_u if unit == "usd" else pl.lit(1, dtype=pl.Int64) if unit == "tick" else qty_u
     t = trades.with_columns(_qu=qty_u, _pu=price_u, _m=m).with_columns(_ce=pl.col("_m").cum_sum() + state.acc)
     t = t.with_columns(_cs=pl.col("_ce") - pl.col("_m"))
     t = t.with_columns(_k0=pl.col("_cs") // T, _k1=(pl.col("_ce") - 1) // T)
@@ -78,6 +83,9 @@ def split_pieces(trades: pl.DataFrame, unit: str, T: int, state: State) -> tuple
     if unit == "usd":
         qty = amt / pl.col("_pu") / QTY_SCALE
         usd = amt / USD_SCALE
+    elif unit == "tick":   # one aggTrade per unit, never split
+        qty = pl.col("qty")
+        usd = pl.col("price") * pl.col("qty")
     else:
         qty = amt / QTY_SCALE
         usd = pl.col("price") * amt / QTY_SCALE

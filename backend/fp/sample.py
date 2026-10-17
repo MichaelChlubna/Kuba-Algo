@@ -24,7 +24,8 @@ TRADES_PER_DAY = 50_000
 
 
 def sample_marker(cfg: dict) -> Path:
-    return cfg["paths"]["parquet"].parent / "SAMPLE"
+    paths = cfg["paths"]
+    return Path(paths.get("parquet") or paths["derived"]).parent / "SAMPLE"
 
 
 def _day_ms(day: dt.date) -> int:

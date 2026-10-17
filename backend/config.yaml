@@ -1,15 +1,16 @@
 symbol: BTCUSDT
 
 paths:
-  # relative to this folder (viewer/); data live in the shared top-level data/ folder
+  # relative to this folder (backend/); data live in the top-level data/ folder (env FP_DATA_DIR overrides)
   raw: ../data/raw         # downloaded zips (mirror of data.binance.vision layout)
   parquet: ../data/parquet # per-day parquet converted from raw CSV
   derived: ../data/derived # candles, footprint, features
 
 download:
   base_url: https://data.binance.vision
-  start: 2026-01-01
-  end: 2026-10-08
+  # default range = rolling window of `retention_days` ending yesterday (fp update keeps only this window);
+  # set start/end here to override the default range of download/build/validate
+  retention_days: 30
   datasets: [aggTrades, metrics, klines_1m, klines_5m]
   workers: 4
   retries: 3
@@ -18,6 +19,7 @@ aggregation:
   timeframes: [1m, 5m, 15m]
   volume_usd: [100000000]      # volume candle thresholds in USD notional
   volume_btc: [1000]           # volume candle thresholds in BTC
+  ticks: [5000]                # tick candles: N aggTrades per candle
   base_bin: 5                  # footprint base bin in USD
   cvd_reset: daily             # none | daily
   cvd_reset_timezone: UTC      # timezone of the daily CVD reset (00:00), e.g. UTC or America/New_York
@@ -42,6 +44,6 @@ sessions:                      # viewer layers; times in `timezone` (DST-aware),
     - {name: New York, start: "08:00", end: "17:00"}
 
 server:
-  host: 127.0.0.1
+  host: 127.0.0.1              # env FP_HOST (0.0.0.0 in Docker)
   port: 8000
   timezone: America/New_York   # display timezone (UI can switch to UTC); DST handled via IANA tz
