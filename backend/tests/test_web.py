@@ -89,3 +89,14 @@ def test_sample_refuses_to_mix_with_real_data(tmp_path):
     pl.DataFrame({"id": [1]}).write_parquet(real)
     with pytest.raises(RuntimeError):
         write_sample(cfg, dt.date(2026, 10, 2), dt.date(2026, 10, 2), n=10)
+
+
+def test_update_keeps_sample_when_offline(tmp_path, monkeypatch):
+    import fp.download
+    from fp.update import update
+    cfg = _cfg(tmp_path) | {"download": {"retention_days": 2}}
+    write_sample(cfg, dt.date(2026, 10, 1), dt.date(2026, 10, 1), n=50)
+    monkeypatch.setattr(fp.download, "download", lambda cfg, a, b, ds=None: {"failed": ["x/aggTrades/y.zip"]})
+    with pytest.raises(RuntimeError):
+        update(cfg)
+    assert sample_marker(cfg).exists() and (cfg["paths"]["parquet"] / "aggTrades/BTCUSDT/2026-10-01.parquet").exists()

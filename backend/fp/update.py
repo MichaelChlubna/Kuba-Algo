@@ -1,7 +1,8 @@
 """Rolling data window for the web deployment: download + build the last N days, drop older ones.
 
 `fp update` is what the scheduler runs once a day (Binance publishes a day's files the next day,
-around 07-09 UTC). Sample data (fp sample) is removed first, so real data never mixes with it.
+around 07-09 UTC). Sample data (fp sample) is removed once real data has been downloaded, so the two
+never mix and an offline update keeps the sample.
 """
 from __future__ import annotations
 
@@ -64,10 +65,13 @@ def update(cfg: dict, days: int | None = None) -> None:
     from .build import build
     from .download import download
 
-    clear_sample(cfg)
     first, last = window(cfg, days)
     res = download(cfg, first, last)
     log.info("download %s..%s: %s", first, last, {k: len(v) for k, v in res.items()})
+    got = [r for k in ("ok", "skip") for r in res.get(k, []) if "/aggTrades/" in r]
+    if not got:   # offline or nothing published: keep whatever data (incl. sample data) is there
+        raise RuntimeError(f"no aggTrades downloaded for {first}..{last} (network / data.binance.vision reachable?)")
+    clear_sample(cfg)   # real data arrived: sample data must not mix with it
     prune(cfg, first)
     build(cfg, first, last)
 

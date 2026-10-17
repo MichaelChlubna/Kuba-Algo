@@ -1,0 +1,40 @@
+# docker compose up            -> web app on http://localhost:8000 + daily data updater
+# docker compose run --rm init  -> optional: synthetic sample data (no download), see README
+name: footprint
+
+x-app: &app
+  build: .
+  image: footprint:latest
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - fp-data:/data
+  restart: unless-stopped
+
+services:
+  web:
+    <<: *app
+    command: ["serve"]
+    ports:
+      - "${FP_BIND:-127.0.0.1}:${FP_PUBLIC_PORT:-8000}:8000"
+
+  # downloads + builds the last FP_RETENTION_DAYS days now, then daily at FP_UPDATE_AT (UTC);
+  # older days are deleted. Needs outbound HTTPS to data.binance.vision.
+  updater:
+    <<: *app
+    command: ["schedule", "--at", "${FP_UPDATE_AT:-09:30}"]
+    healthcheck:
+      disable: true
+
+  # one-off: synthetic sample data for a quick start without network access
+  init:
+    <<: *app
+    command: ["sample", "--days", "${FP_RETENTION_DAYS:-30}"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    profiles: ["sample"]
+
+volumes:
+  fp-data:
