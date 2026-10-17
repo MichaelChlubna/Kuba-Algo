@@ -9,36 +9,42 @@ Podrobný systematický popis (data → zpracování → viewer → features a m
 
 ```
 footprint/
-├── viewer.bat, start.bat   spouštěče (dvojklik)
+├── viewer.bat, start.bat   spouštěče (dvojklik; Docker nebo lokální Python)
+├── docker-compose.yml      web + denní aktualizace dat, viz README.md
 ├── data/                   sdílená data (raw zipy, parquet, odvozené svíčky/footprint/series, validace)
-└── viewer/                 tato fáze 1: pipeline + viewer + features + metriky
-    ├── fp/                 Python balík (download, build, validate, server) + fp/static (frontend)
-    ├── tests/              pytest
-    ├── config.yaml         konfigurace; cesty k datům relativně: ../data/...
-    ├── README.md, metodika.md, footprint_prompt.md (původní zadání)
+├── backend/                pipeline + API server + features + metriky
+│   ├── fp/                 Python balík (download, build, update, validate, server)
+│   ├── tests/              pytest (včetně golden testů proti výstupům původní verze)
+│   └── config.yaml         konfigurace; cesty k datům relativně: ../data/...
+├── frontend/               webový viewer (React + TypeScript + Canvas)
+└── docs/                   tato dokumentace, metodika.md, datove-struktury.md
 ```
 
+> Původní viewer (`viewer/fp/static`, čistý JavaScript) byl přepsán do `frontend/`. Popis vykreslování
+> níže odpovídá i nové verzi (engine je převedený 1:1), jen soubory jsou jinde (`frontend/src/chart/engine.ts`).
+
 Cesty `data/...` v tomto dokumentu jsou vůči hlavní složce `footprint/`. Příkazy `python -m fp ...` se
-spouštějí ve složce `viewer/` (spouštěče to dělají samy). Další fáze (kvantitativní analýza) budou
-v paralelních podsložkách a čtou stejnou složku `data/`.
+spouštějí ve složce `backend/` (spouštěče to dělají samy).
 
 ## Spuštění
 
-**Nejjednodušší:** dvojklik na `start.bat` v hlavní složce → menu:
-1 viewer (otevře prohlížeč), 2 aktualizace dat (stažení + build do včerejška), 3 validace, 4 testy,
-5 instalace knihoven. `viewer.bat` spustí rovnou viewer (pokud už běží, jen otevře prohlížeč).
+Viz [README.md](../README.md) (Docker Compose, vývojový režim). Menu `start.bat`: 1 aplikace, 2 aktualizace
+dat (posledních 30 dní), 3 ukázková data, 4 testy, 5 instalace knihoven, 6 zastavení.
 
-Z příkazové řádky (ve složce `viewer/`):
+Z příkazové řádky (ve složce `backend/`):
 
 ```bash
-pip install polars pyarrow pyyaml requests fastapi uvicorn pytest
-python -m fp download                          # rozsah z config.yaml
+pip install -r requirements.txt -r requirements-dev.txt
+python -m fp update                            # stáhne + postaví posledních 30 dní, starší smaže
+python -m fp schedule --at 09:30               # totéž každý den v 09:30 UTC
+python -m fp sample                            # syntetická ukázková data (bez internetu)
+python -m fp download                          # rozsah = posledních 30 dní (nebo download.start/end)
 python -m fp download --start 2026-10-08 --end 2026-10-08
 python -m fp download --datasets trades       # volitelné: surové obchody jen pro přesnou validaci
 python -m fp build                             # parquet + svíčky M1/M5/M15 + objemové + features
 python -m fp build --end yesterday             # totéž do včerejška (vhodné po stažení nových dní)
 python -m fp validate                          # porovnání s klines + známé případy A/B
-python -m fp serve                             # viewer na http://localhost:8000
+python -m fp serve                             # API + sestavený frontend na http://localhost:8000
 python -m pytest
 ```
 

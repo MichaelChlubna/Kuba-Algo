@@ -1,12 +1,122 @@
-# BTCUSDT perp – výzkum order flow
+# BTCUSDT perp – footprint (webová aplikace)
 
-| složka / soubor | obsah |
+Footprint / order-flow viewer pro BTCUSDT perpetual (Binance USDⓈ-M). Backend v Pythonu stahuje denní
+aggTrades a open interest z data.binance.vision, staví svíčky, footprint a metriky a servíruje je přes API.
+Frontend v Reactu je kreslí na Canvas.
+
+Umí: footprint bid × ask, delta, imbalance s nastavitelným poměrem (např. 300 %) a minimem v USD, stacked
+imbalance, POC (objem i delta), profil objemu (session / den / vybraný rozsah s POC a value area), VWAP,
+časové (1m / 5m / 15m), objemové (USD, BTC) a tick svíčky, plynulý posun a zoom (myš, dotyk, pinch),
+kříž s tooltipem, historii (skok na datum, rozsah), nastavení (barvy, prahy, rozložení) uložené v prohlížeči.
+
+## Rychlé spuštění (Docker Compose)
+
+Potřeba: Docker (Docker Desktop na Windows / Macu).
+
+```bash
+cp .env.example .env              # volitelné: heslo, port, čas aktualizace
+docker compose up -d --build      # web na http://localhost:8000 + denní aktualizace dat
+```
+
+Při prvním startu je složka dat prázdná. Služba `updater` hned stáhne posledních 30 dní (pár minut,
+potřebuje přístup na data.binance.vision) a pak to opakuje každý den v `FP_UPDATE_AT` (UTC, výchozí 09:30,
+kdy už Binance zveřejní včerejší soubory). Data starší než `FP_RETENTION_DAYS` maže.
+
+Bez internetu (nebo pro rychlé vyzkoušení) jdou nahrát syntetická ukázková data:
+
+```bash
+docker compose run --rm init      # 30 dní ukázkových dat, aplikace ukáže štítek „ukázková data“
+```
+
+Ukázková data se zapisují jen do prázdné složky a první úspěšná aktualizace je nahradí skutečnými.
+
+Na Windows stačí dvojklik na `viewer.bat` (spustí compose a otevře prohlížeč) nebo `start.bat` (menu:
+spuštění, aktualizace, ukázková data, testy, instalace, zastavení). Bez Dockeru spouštěče použijí lokální Python.
+
+Užitečné příkazy:
+
+```bash
+docker compose logs -f updater                 # průběh stahování
+docker compose run --rm updater update         # aktualizace hned, mimo plán
+docker compose down                            # zastavení (data zůstávají ve volume fp-data)
+docker compose down -v                         # zastavení a smazání dat
+```
+
+## Provoz na veřejném serveru
+
+Compose ve výchozím stavu poslouchá jen na `127.0.0.1`. Pro přístup zvenku nastavte v `.env`:
+
+```bash
+FP_BIND=0.0.0.0
+FP_AUTH_USER=jmeno
+FP_AUTH_PASSWORD=dlouhe-heslo
+```
+
+Aplikace pak vyžaduje HTTP Basic přihlášení (kromě `/api/health`). Basic auth posílá heslo v každém
+požadavku, takže před ni patří HTTPS (reverzní proxy, např. Caddy nebo nginx s Let's Encrypt).
+
+## Zdroj dat a klíče
+
+Data jsou veřejné denní soubory z https://data.binance.vision (aggTrades, metrics s open interest),
+**API klíč není potřeba**. Stahování, kontrolu SHA256 a převod řeší `backend/fp/download.py` a `convert.py`.
+Napojení živého Binance WebSocketu je připravené na později. Případné klíče patří jen do `.env` (backend),
+nikdy do frontendu ani do repozitáře. `.env` je v `.gitignore`, vzor je `.env.example`.
+
+## Vývoj
+
+Potřeba: Python 3.12+ a Node 22+.
+
+```bash
+# backend (API na http://localhost:8000)
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt
+python -m fp sample          # nebo: python -m fp update (skutečná data)
+python -m fp serve
+
+# frontend (Vite s hot reloadem na http://localhost:5173, /api se přeposílá na backend)
+cd frontend
+npm ci
+npm run dev
+```
+
+`npm run build` sestaví frontend do `frontend/dist`, odkud ho `python -m fp serve` servíruje sám
+(jiný backend pro dev server: `FP_BACKEND=http://host:port npm run dev`).
+
+Testy:
+
+```bash
+cd backend && python -m pytest       # pipeline, metriky, API, golden testy
+cd frontend && npm test              # imbalance, stacky, VWAP, převzorkování
+cd frontend && npm run typecheck
+```
+
+Golden testy (`backend/tests/golden/`) porovnávají výstupy (svíčky, footprint, delta, POC, imbalance metriky,
+odpovědi API) s výstupy původní verze aplikace na stejných ukázkových datech. Frontendový test imbalance
+kontroluje, že prohlížeč počítá imbalance stejně jako backend. Po záměrné změně výpočtu se golden data
+přegenerují: `cd backend && python -m tests.golden_util`.
+
+## Architektura
+
+```
+data.binance.vision ──► fp download / convert ──► data/parquet (po dnech)
+                                   │
+                         fp build (svíčky, footprint v binu 5 USD, POC, metriky, objemové / tick svíčky)
+                                   ▼
+                        data/derived (parquet po dnech) ──► FastAPI (fp/server.py, sloupcový JSON, gzip)
+                                                                   │
+                                     React + Zustand + Canvas (frontend/) ◄┘
+```
+
+| složka | obsah |
 |---|---|
-| `viewer.bat` | spustí footprint viewer (http://localhost:8000) |
-| `start.bat` | menu: viewer, aktualizace dat (stažení + build do včerejška), validace, testy, instalace knihoven |
-| `data/` | sdílená data pro všechny fáze: `raw/` (zipy Binance), `parquet/` (aggTrades, metrics, klines po dnech), `derived/` (svíčky s features a metrikami, footprint, series), `validation/` |
-| `viewer/` | **fáze 1 (hotovo):** pipeline, footprint viewer (CZ / EN), features knotů, metriky uvnitř svíček – viz [viewer/README.md](viewer/README.md) a [viewer/metodika.md](viewer/metodika.md) |
+| `backend/fp/` | pipeline (`download`, `convert`, `build`, `volume_bars`, `metrics`, `periods`), plán aktualizací (`update`), ukázková data (`sample`), API (`server`) |
+| `backend/config.yaml` | konfigurace (symbol, okno 30 dní, biny, prahy objemových a tick svíček, session) |
+| `frontend/src/chart/engine.ts` | vykreslování: kreslí jen viditelné svíčky, kříž na samostatné vrstvě, data se načítají po kouscích |
+| `frontend/src/lib/footprint.ts` | imbalance, stacked imbalance, VWAP, převzorkování binů |
+| `frontend/src/store/` | nastavení (Zustand, uložené v `localStorage`) a stav UI |
+| `frontend/src/api/types.ts` | typy sdílené s backendem, popsané v [docs/datove-struktury.md](docs/datove-struktury.md) |
+| `data/` | data (v Dockeru volume `fp-data`), není v repozitáři |
+| `docs/` | [metodika](docs/metodika.md) (výpočty, features, metriky), [pipeline](docs/pipeline.md), původní zadání |
 
-Pro navazující analýzy: hotové svíčky se všemi features, podmínkami a metrikami jsou v
-`data/derived/series/<agg>/YYYY-MM-DD.parquet` (agg = `1m`, `5m`, `15m`, `vusd_<práh>`, `vbtc_<práh>`),
-slovník sloupců je v `viewer/metodika.md`, příloha 15.
+Proměnné prostředí backendu: `FP_DATA_DIR`, `FP_HOST`, `FP_PORT`, `FP_RETENTION_DAYS`, `FP_AUTH_USER`,
+`FP_AUTH_PASSWORD`, `FP_STATIC_DIR`, `FP_CONFIG` (`backend/fp/config.py`, `server.py`).

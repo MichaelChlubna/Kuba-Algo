@@ -1,5 +1,8 @@
 # Metodika – BTCUSDT perp: data, footprint, features absorpce
 
+> Pozn. k webové verzi: složka `viewer/` je nyní `backend/` a frontend `fp/static` byl přepsán do `frontend/`
+> (React + TypeScript, stejné vykreslování). Spuštění a architektura: [README.md](../README.md).
+
 Stav k 2026-10-09. Dokument popisuje, co projekt aktuálně umí a jak přesně to počítá: od stažení dat
 přes agregaci a validaci až po viewer, features a metriky uvnitř svíček. U features a metrik je kromě
 výpočtu uvedena i **teze** (proč tam metrika je) a **co v ní chceme vidět**.
