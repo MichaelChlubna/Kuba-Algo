@@ -1,0 +1,5 @@
+# Windows checkouts (core.autocrlf) must not break the Linux image or the launchers
+* text=auto eol=lf
+*.bat text eol=crlf
+*.parquet binary
+*.png binary
