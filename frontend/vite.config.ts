@@ -8,7 +8,7 @@ const backend = process.env.FP_BACKEND ?? 'http://localhost:8000';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: { port: 5173, proxy: { '/api': backend } },
+  server: { port: 5173, proxy: { '/api': { target: backend, ws: true } } },
   build: { outDir: 'dist', sourcemap: true },
   test: { environment: 'node' },
 });

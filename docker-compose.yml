@@ -16,6 +16,9 @@ services:
   web:
     <<: *app
     command: ["serve"]
+    environment:
+      FP_LIVE: "${FP_LIVE:-1}"   # live Binance WebSocket data on top of the daily dumps
+      FP_BIND: "${FP_BIND:-127.0.0.1}"   # only for the startup warning about missing auth
     ports:
       - "${FP_BIND:-127.0.0.1}:${FP_PUBLIC_PORT:-8000}:8000"
 

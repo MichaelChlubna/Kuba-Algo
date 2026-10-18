@@ -25,6 +25,7 @@ Konvence:
 | `GET /api/profile` | `start, end, bin=25` | `ProfileResponse`: profil objemu rozsahu, POC a 70 % value area; rozsah max. 400 dní (jinak 413) |
 | `POST /api/volume` | `unit=usd\|btc\|tick, value` | `Job`: dopočítá vlastní objemové / tick svíčky na pozadí; 429 když běží jiná úloha |
 | `GET /api/jobs` | – | stav úloh `{agg: Job}` |
+| `WS /api/live` | `agg` | `LiveMessage` při každé změně (nejvýš 2× za sekundu), jinak každých 5 s jen stav |
 
 ## Typy
 
@@ -56,6 +57,18 @@ volume_usd, delta_usd`. K nim `levels`: `id, level, buy_usd, sell_usd`.
 `levels` (`level, buy_usd, sell_usd`), `poc` (úroveň s největším objemem, při shodě nejnižší), `val` / `vah`
 (spodní a horní hrana value area: od POC se přidává větší sousední úroveň, při shodě ta vyšší, dokud není
 70 % objemu), `volume_usd`, `delta_usd`.
+
+### Živá data
+
+Svíčky a footprint dnů, které ještě nejsou postavené z denních souborů, doplňuje živý feed; `/api/candles`,
+`/api/footprint`, `/api/candle`, `/api/periods` a `/api/profile` je vrací spolu s historií, `meta.aggregations[a].last_day`
+pak ukazuje dnešek. Živým svíčkám chybí jen sloupce, které potřebují historii (`z`, `vspeed`, `rel_tod`, `d_oi`, `oi_end`).
+
+- `meta.live` (`LiveStatus`, `null` = vypnuto): `state` (`waiting` = ještě žádná skutečná historie / `starting` / `backfill` / `live` / `reconnecting`), `last_ts`
+  (čas posledního živého obchodu), `lag_ms`, `base_day` (poslední postavený den), `backfill_from`, `error`.
+- `LiveMessage` (WebSocket): `agg`, `status` (`LiveStatus`), `candles` (lehké sloupce jako `/api/candles`: otevřená
+  svíčka a svíčky uzavřené od minulé zprávy; první zpráva posledních 5) a `fp` (jejich footprint jako `/api/footprint`).
+  Klient svíčku se stejným `cid` nahradí, novější přidá na konec.
 
 ### Job
 

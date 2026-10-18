@@ -1,4 +1,4 @@
-import type { Columnar, Job, Meta, PeriodsResponse, ProfileResponse } from './types';
+import type { Columnar, Job, LiveMessage, Meta, PeriodsResponse, ProfileResponse } from './types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -44,3 +44,12 @@ export const api = {
     fetchJson<Job & { agg: string }>(`/api/volume?${q({ unit, value })}`, { method: 'POST' }),
   jobs: () => fetchJson<Record<string, Job>>('/api/jobs'),
 };
+
+/** Live updates of one aggregation; same origin, so HTTP Basic credentials are reused. */
+export function liveSocket(agg: string, onMessage: (m: LiveMessage) => void, onClose: () => void): WebSocket {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/api/live?${q({ agg })}`);
+  ws.onmessage = (e) => onMessage(JSON.parse(e.data as string) as LiveMessage);
+  ws.onclose = onClose;
+  return ws;
+}

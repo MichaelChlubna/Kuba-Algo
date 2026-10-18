@@ -15,7 +15,7 @@ Potřeba: Docker (Docker Desktop na Windows / Macu).
 
 ```bash
 cp .env.example .env              # volitelné: heslo, port, čas aktualizace
-docker compose up -d --build      # web na http://localhost:8000 + denní aktualizace dat
+docker compose up -d --build      # web na http://localhost:8000 + denní aktualizace dat + živá data
 ```
 
 Při prvním startu je složka dat prázdná. Služba `updater` hned stáhne posledních 30 dní (pár minut,
@@ -57,10 +57,30 @@ požadavku, takže před ni patří HTTPS (reverzní proxy, např. Caddy nebo ng
 
 ## Zdroj dat a klíče
 
-Data jsou veřejné denní soubory z https://data.binance.vision (aggTrades, metrics s open interest),
+Historie jsou veřejné denní soubory z https://data.binance.vision (aggTrades, metrics s open interest),
 **API klíč není potřeba**. Stahování, kontrolu SHA256 a převod řeší `backend/fp/download.py` a `convert.py`.
-Napojení živého Binance WebSocketu je připravené na později. Případné klíče patří jen do `.env` (backend),
-nikdy do frontendu ani do repozitáře. `.env` je v `.gitignore`, vzor je `.env.example`.
+Případné klíče patří jen do `.env` (backend), nikdy do frontendu ani do repozitáře. `.env` je v `.gitignore`,
+vzor je `.env.example`.
+
+## Živá data (Binance WebSocket)
+
+V Docker Compose jsou zapnutá (`FP_LIVE=1`, vypnutí `FP_LIVE=0` v `.env`). Web se připojí na veřejný stream
+aggTrades (`wss://fstream.binance.com`, bez klíče) a navazuje přesně na poslední obchod posledního
+postaveného dne: chybějící obchody od půlnoci UTC (a výpadky spojení) doplní přes REST
+(`fapi.binance.com`), nové obchody bere z WebSocketu. Prohlížeč dostává otevřenou svíčku i s footprintem
+každou sekundu a graf se posouvá za poslední svíčkou. V liště je štítek „živě“ (zelený) nebo „doplňuji“ /
+„připojuji“ (oranžový).
+
+- Živé svíčky se počítají stejnými funkcemi jako denní build (test `backend/tests/test_live.py` to porovnává),
+  objemové a tick svíčky navazují na stav posledního postaveného dne. Bez historie zůstávají jen z-score,
+  objem vůči času dne a ΔOI (ty doplní až denní build).
+- Po denní aktualizaci (09:30 UTC) se živá data sama přepnou na nově postavený den.
+- Obchody se průběžně ukládají do `data/live/`, takže restart nemusí vše stahovat znovu.
+- Živá data navazují jen na skutečnou historii: dokud updater nepostaví první dny (nebo když jsou ve složce
+  ukázková data), čekají a pak se zapnou samy. Při prvním spuštění během dne doplnění od půlnoci chvíli trvá
+  (REST limit Binance, zhruba 100 tisíc obchodů za minutu).
+- Binance blokuje přístup z některých zemí (např. USA, odpověď 451); server pak musí běžet jinde.
+- Adresy streamu a REST jsou v `backend/config.yaml`, sekce `live`.
 
 ## Vývoj
 

@@ -47,3 +47,13 @@ server:
   host: 127.0.0.1              # env FP_HOST (0.0.0.0 in Docker)
   port: 8000
   timezone: America/New_York   # display timezone (UI can switch to UTC); DST handled via IANA tz
+
+live:                          # live data: Binance USDⓈ-M aggTrade WebSocket + REST backfill (public, no API key)
+  enabled: false               # env FP_LIVE=1 turns it on (docker compose: on by default); never on sample data
+  ws_urls:                     # tried in order; `<symbol>@aggTrade` is appended
+    - wss://fstream.binance.com/market/ws
+    - wss://fstream.binance.com/ws
+  rest_url: https://fapi.binance.com
+  rest_interval_s: 0.6         # REST backfill pacing (aggTrades weight 20, limit 2400 / min)
+  refresh_s: 1.0               # how often live candles are recomputed and pushed to the browser
+  persist_s: 60                # live trades are saved under data/live/ so a restart does not refetch them

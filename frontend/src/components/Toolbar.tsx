@@ -37,6 +37,8 @@ export function Toolbar({ engine }: { engine: ChartEngine | null }) {
   const s = useSettings();
   const meta = useUi((u) => u.meta);
   const status = useUi((u) => u.status);
+  const live = useUi((u) => u.live);
+  const liveOk = live?.state === 'live' && (live.lag_ms ?? 0) < 15_000;
   const rangeFrom = useUi((u) => u.rangeFrom), rangeTo = useUi((u) => u.rangeTo);
   const setUi = useUi((u) => u.set);
   const [custom, setCustom] = useState(false);
@@ -62,6 +64,13 @@ export function Toolbar({ engine }: { engine: ChartEngine | null }) {
     <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line bg-panel px-2.5 py-1.5">
       <span className="mr-1 font-semibold text-strong">{meta?.symbol ?? 'BTCUSDT'} perp</span>
       {meta?.sample && <span className="rounded border border-line px-1.5 text-[11px] text-dim" title={t('sample_tt')}>{t('sample_badge')}</span>}
+      {live && live.state !== 'off' && live.state !== 'waiting' && (
+        <span className={`inline-flex items-center gap-1 text-[11px] ${liveOk ? 'text-emerald-500' : 'text-amber-500'}`}
+          title={t('live_tt', live.base_day ? `${live.base_day} +1` : '–', live.lag_ms != null ? `${(live.lag_ms / 1000).toFixed(1)} s` : '–')}>
+          <span className={`h-2 w-2 rounded-full ${liveOk ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          {t(`live_${live.state}` as 'live_live')}
+        </span>
+      )}
       <label className="inline-flex items-center gap-1.5 text-dim">{t('agg')}
         <select value={custom ? '__custom' : s.agg} onChange={(e) => {
           if (e.target.value === '__custom') { setCustom(true); return; }

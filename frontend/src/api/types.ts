@@ -39,6 +39,25 @@ export interface Meta {
   metric_cols: string[];
   sessions: { timezone: string; list: SessionDef[] };
   max_light_candles: number;
+  live: LiveStatus | null; // null = live data off on the server (FP_LIVE)
+}
+
+/** State of the live Binance feed (GET /api/meta `live`, WebSocket /api/live `status`). */
+export interface LiveStatus {
+  state: 'waiting' | 'starting' | 'backfill' | 'live' | 'reconnecting' | 'off'; // waiting: no real data built yet
+  last_ts: number | null; // time of the last live trade
+  lag_ms: number | null;
+  base_day: string | null; // last day built from the daily dumps; live candles start the day after
+  backfill_from?: number | null; // aggTrade id the REST backfill is at
+  error?: string | null;
+}
+
+/** Message of WebSocket /api/live?agg=: the open candle and candles closed since the last message. */
+export interface LiveMessage {
+  agg: string;
+  status: LiveStatus;
+  candles?: Columnar<Candle>;
+  fp?: Columnar<FootprintRow>;
 }
 
 /** Candle with the light columns of GET /api/candles (enough for chart, table, tooltip, POC markers). */

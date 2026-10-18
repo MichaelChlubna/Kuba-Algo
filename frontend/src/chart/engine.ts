@@ -3,11 +3,12 @@
 // same algorithms (level of detail, per-pixel merging, lazy loading by UTC day), plus imbalance
 // highlighting, VWAP and a visible-range volume profile. Crosshair and tooltip live on a separate overlay
 // canvas, so moving the mouse never redraws the chart itself.
-import { api, toRows } from '../api/client';
-import type { CandleFootprint, CandleFull, FootprintRow, Meta, Period, ProfileResponse } from '../api/types';
+import { api, liveSocket, toRows } from '../api/client';
+import type { CandleFootprint, CandleFull, Columnar, FootprintRow, LiveMessage, Meta, Period, ProfileResponse } from '../api/types';
 import { translate, numLocale, type I18nKey } from '../i18n';
 import { aggLabel, fmtDur, fmtK, fmtPrice, fmtTrades, isTimeAgg, TF_MIN } from '../lib/format';
 import { imbalances, percentile, rebin, vwap, type Imbalances } from '../lib/footprint';
+import { mergeLive } from '../lib/live';
 import { DAY, dayNum, fmtTs, isoDay, localInfo, zonedToUtc } from '../lib/time';
 import { useSettings, type Settings } from '../store/settings';
 import { useUi } from '../store/ui';
@@ -35,6 +36,7 @@ interface Store {
   fpByDay: Map<number, number[]>;
   fpInflight: Set<number>;
   vwap?: { key: string; values: Float64Array };
+  live?: boolean; // live updates reached the last loaded candle: new days may be appended
 }
 
 const newStore = (): Store => ({ candles: [], minDay: null, maxDay: null, inflight: new Map(), fp: new Map(), fpByDay: new Map(), fpInflight: new Set() });
@@ -81,6 +83,9 @@ export class ChartEngine {
   private unsub: (() => void)[] = [];
   private ro: ResizeObserver;
   private disposed = false;
+  private ws: WebSocket | null = null;
+  private wsTimer: number | null = null;
+  private liveLayersAt = 0;
 
   constructor(private canvas: HTMLCanvasElement, private overlay: HTMLCanvasElement, private tooltip: HTMLDivElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -94,6 +99,7 @@ export class ChartEngine {
 
   dispose() {
     this.disposed = true;
+    this.connectLive();
     this.unsub.forEach((u) => u());
     this.ro.disconnect();
     window.removeEventListener('pointerup', this.onPointerUp);
@@ -124,6 +130,7 @@ export class ChartEngine {
   // ---------------------------------------------------------------- init / navigation
   async init(meta: Meta) {
     this.meta = meta;
+    useUi.getState().set({ live: meta.live ?? null });
     const s = this.s;
     this.tz = s.tz || meta.timezone || this.tz;
     this.bin = s.bin && meta.bins.includes(s.bin) ? s.bin : meta.default_bin || this.bin;
@@ -133,6 +140,7 @@ export class ChartEngine {
     const last = dayNum(meta.aggregations[this.agg].last_day);
     useUi.getState().set({ rangeFrom: isoDay(Math.max(dayNum(meta.aggregations[this.agg].first_day), last - 2)), rangeTo: isoDay(last) });
     await this.gotoTime((last + 1) * DAY - 1, 'right');
+    this.connectLive();
   }
 
   setMeta(meta: Meta) { this.meta = meta; }
@@ -222,6 +230,7 @@ export class ChartEngine {
     if (!this.meta?.aggregations[a]) return;
     const tc = this.centerTime();
     this.agg = a; this.selected = -1;
+    this.connectLive();
     if (useSettings.getState().agg !== a) useSettings.getState().set({ agg: a });
     if (this.range) { // keep the loaded range when it fits the new aggregation
       const m = this.meta.aggregations[a];
@@ -396,6 +405,74 @@ export class ChartEngine {
         if (this.RVP.inflight === key) { this.RVP = { ...this.RVP, key, data, inflight: '' }; this.draw(); }
       } catch (e) { this.RVP.inflight = ''; this.status(this.t('err') + (e as Error).message); }
     }, 220);
+  }
+
+  // ---------------------------------------------------------------- live data (WebSocket /api/live)
+  /** (Re)connect the live stream of the current aggregation; closes it when live data are off or on dispose. */
+  private connectLive() {
+    if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
+    if (this.wsTimer !== null) { clearTimeout(this.wsTimer); this.wsTimer = null; }
+    if (this.disposed || !this.meta?.live) return;
+    const agg = this.agg;
+    this.ws = liveSocket(agg, (m) => this.applyLive(m), () => {
+      this.ws = null;
+      const prev = useUi.getState().live ?? this.meta!.live!;
+      useUi.getState().set({ live: { ...prev, state: 'reconnecting' } });
+      if (!this.disposed && this.agg === agg) this.wsTimer = window.setTimeout(() => this.connectLive(), 3000);
+    });
+  }
+
+  private applyLive(m: LiveMessage) {
+    useUi.getState().set({ live: m.status });
+    const st = this.stores.get(m.agg);
+    if (!m.candles?.n || !st || st.maxDay === null) return;
+    const rows = toRows(m.candles) as Row[];
+    const current = this.stores.get(this.agg) === st;
+    const follow = current && this.rightIdx >= st.candles.length - 1; // the newest candle is in view
+    const res = mergeLive(st.candles, rows, st.maxDay, () => st.live === true);
+    if (res.appended + res.replaced === 0) return;
+    st.live = true;
+    const lastDay = Math.floor(st.candles[st.candles.length - 1].start_ts / DAY);
+    if (lastDay > st.maxDay) {
+      st.maxDay = lastDay;
+      const am = this.meta?.aggregations[m.agg];
+      if (am && dayNum(am.last_day) < lastDay) am.last_day = isoDay(lastDay);
+    }
+    if (m.fp) this.applyLiveFp(st, m.fp);
+    st.vwap = undefined;
+    if (!current) return;
+    if (follow) this.rightIdx += res.appended;
+    if (res.appended) this.refreshLiveLayers();
+    if (this.selected >= 0) this.publishSelected();
+    this.draw();
+  }
+
+  /** Footprint of live candles; days whose footprint is not loaded yet are left to ensure() (REST). */
+  private applyLiveFp(st: Store, fp: Columnar<FootprintRow>) {
+    const c = fp.cols, n = fp.n;
+    let i = 0;
+    while (i < n) {
+      const id = c.cid[i];
+      let j = i;
+      while (j < n && c.cid[j] === id) j++;
+      const day = Math.floor(c.start_ts[i] / DAY), list = st.fpByDay.get(day);
+      if (list) {
+        if (!st.fp.has(id)) list.push(id);
+        st.fp.set(id, { lv: c.level.slice(i, j), b: c.buy_usd.slice(i, j), s: c.sell_usd.slice(i, j), cache: new Map() });
+      }
+      i = j;
+    }
+  }
+
+  /** Sessions / days and the range profile of the live day, refreshed at most every 15 s. */
+  private refreshLiveLayers() {
+    const now = Date.now();
+    if (now - this.liveLayersAt < 15_000) return;
+    this.liveLayersAt = now;
+    const last = this.store().candles[this.store().candles.length - 1];
+    if (last) this.PER.blocks.delete(Math.floor(last.start_ts / DAY / PERIOD_BLOCK_DAYS));
+    this.RVP.key = '';
+    this.ensure();
   }
 
   // ---------------------------------------------------------------- geometry
