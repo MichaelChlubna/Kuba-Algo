@@ -1,4 +1,5 @@
-"""Footprint viewer backend (FastAPI): JSON API + the built React frontend (frontend/dist)."""
+"""Footprint viewer backend (FastAPI): JSON API, the product site at / (site/) and the built React
+frontend (frontend/dist) at /app/."""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import polars as pl
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -31,6 +32,9 @@ log = logging.getLogger(__name__)
 
 # built frontend (npm run build); FP_STATIC_DIR overrides (Docker image: /app/static)
 STATIC = Path(os.environ.get("FP_STATIC_DIR") or Path(__file__).resolve().parents[2] / "frontend" / "dist")
+# product page + manual (static files); FP_SITE_DIR overrides (Docker image: /app/site)
+SITE = Path(os.environ.get("FP_SITE_DIR") or Path(__file__).resolve().parents[2] / "site")
+APP_PREFIX = "/app"
 DAY_MS = 86_400_000
 MAX_CANDLES = 20_000      # per request, full columns
 MAX_LIGHT_CANDLES = 250_000  # per request, light columns (range loading)
@@ -139,7 +143,7 @@ def create_app(cfg: dict, auth: tuple[str, str] | None = None, live: LiveFeed | 
         response = await call_next(request)
         # index.html must be revalidated (new builds); hashed assets can be cached forever
         path = request.url.path
-        if path.startswith("/assets/"):
+        if path.startswith(f"{APP_PREFIX}/assets/"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif not path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-cache"
@@ -386,21 +390,39 @@ def create_app(cfg: dict, auth: tuple[str, str] | None = None, live: LiveFeed | 
         except (WebSocketDisconnect, RuntimeError):
             pass
 
+    def static_file(root: Path, path: str) -> Path | None:
+        f = (root / path).resolve()
+        if f.is_dir():
+            f = f / "index.html"
+        return f if f.is_file() and (f == root.resolve() or root.resolve() in f.parents) else None
+
     if STATIC.is_dir() and (STATIC / "index.html").exists():
         if (STATIC / "assets").is_dir():
-            app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
+            app.mount(f"{APP_PREFIX}/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
 
-        @app.get("/{path:path}", include_in_schema=False)
+        @app.get(APP_PREFIX, include_in_schema=False)
+        def app_root():
+            return RedirectResponse(f"{APP_PREFIX}/")
+
+        @app.get(APP_PREFIX + "/{path:path}", include_in_schema=False)
         def spa(path: str):
-            f = (STATIC / path).resolve()
-            if path and f.is_file() and STATIC.resolve() in f.parents:
-                return FileResponse(f)
-            return FileResponse(STATIC / "index.html")
+            return FileResponse((path and static_file(STATIC, path)) or STATIC / "index.html")
     else:
-        @app.get("/", include_in_schema=False)
-        def no_frontend():
+        @app.get(APP_PREFIX + "/{path:path}", include_in_schema=False)
+        def no_frontend(path: str = ""):
             return Response("frontend not built: run `npm run build` in frontend/ (or use docker compose)",
                             media_type="text/plain")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def site(path: str):
+        if path and not path.endswith("/") and (SITE / path).is_dir():
+            return RedirectResponse(f"/{path}/")
+        f = static_file(SITE, path) if SITE.is_dir() else None
+        if f is None:
+            if not path:  # no site/ (e.g. a bare backend checkout): go straight to the app
+                return RedirectResponse(f"{APP_PREFIX}/")
+            raise HTTPException(404)
+        return FileResponse(f)
 
     return app
 
@@ -411,6 +433,6 @@ def serve(cfg: dict, host: str | None = None, port: int | None = None) -> None:
     host, port = host or scfg.get("host", "127.0.0.1"), port or scfg.get("port", 8000)
     public = os.environ.get("FP_BIND", host)   # docker compose: the address the port is published on
     if public not in ("127.0.0.1", "localhost") and not _basic_auth():
-        log.warning("reachable on %s without FP_AUTH_USER / FP_AUTH_PASSWORD: anyone who reaches the port can use the API", public)
-    print(f"Footprint viewer: http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}")
+        log.info("public on %s without login (FP_AUTH_USER / FP_AUTH_PASSWORD unset)", public)
+    print(f"Deltaprint: http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port} (app at /app/)")
     uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning")

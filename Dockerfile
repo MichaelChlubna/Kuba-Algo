@@ -13,7 +13,7 @@ RUN npm run build
 # Stage 2: Python backend + built frontend
 FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
-    FP_DATA_DIR=/data FP_HOST=0.0.0.0 FP_PORT=8000 FP_STATIC_DIR=/app/static
+    FP_DATA_DIR=/data FP_HOST=0.0.0.0 FP_PORT=8000 FP_STATIC_DIR=/app/static FP_SITE_DIR=/app/site
 WORKDIR /app
 COPY backend/requirements.txt ./
 RUN --mount=type=secret,id=extra_ca,required=false \
@@ -22,6 +22,7 @@ RUN --mount=type=secret,id=extra_ca,required=false \
 COPY backend/fp ./fp
 COPY backend/config.yaml ./
 COPY --from=frontend /src/dist ./static
+COPY site ./site
 RUN useradd --uid 1000 --create-home fp && mkdir -p /data && chown fp /data
 USER fp
 VOLUME /data

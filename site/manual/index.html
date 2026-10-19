@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deltaprint · uživatelský manuál</title>
+<meta name="description" content="Manuál k Deltaprint: ovládání footprint grafu, imbalance, profily, vrstvy, detail svíčky, agregace a živá data.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='3' width='5' height='10' fill='%2326a65b'/%3E%3Crect x='9' y='5' width='5' height='8' fill='%23e04848'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+:root {
+  --bg: #080e17; --panel: #101b29; --panel-2: #142234; --ink: #e9eef5; --muted: #8b9aab; --line: #1c2a3b;
+  --buy: #2fc08b; --sell: #f0605a;
+  --f-display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f3f6f9; --panel: #ffffff; --panel-2: #f6f8fb; --ink: #0d1826; --muted: #566577; --line: #d6dee7;
+          --buy: #128a5d; --sell: #cf3f39; color-scheme: light; }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 var(--f-body); }
+a { color: var(--buy); }
+.nav { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.nav .in { max-width: 1180px; margin: 0 auto; padding: 14px 16px; display: flex; align-items: center; gap: 16px; }
+.brand { font-family: var(--f-display); font-weight: 800; font-stretch: 112%; letter-spacing: .02em; color: var(--ink); text-decoration: none; }
+.nav .sp { flex: 1; }
+.nav a.l { color: var(--muted); text-decoration: none; font-size: 14px; }
+.nav a.l:hover { color: var(--ink); }
+.btn { display: inline-block; background: var(--buy); color: #04110b; font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 8px; text-decoration: none; }
+.layout { max-width: 1180px; margin: 0 auto; padding: 32px 16px 80px; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 48px; }
+#TOC { position: sticky; top: 84px; align-self: start; font-size: 14px; }
+#TOC ul { list-style: none; margin: 0; padding: 0; }
+#TOC li { margin: 2px 0; }
+#TOC a { color: var(--muted); text-decoration: none; display: block; padding: 3px 0 3px 10px; border-left: 2px solid var(--line); }
+#TOC a:hover { color: var(--ink); border-left-color: var(--buy); }
+article { min-width: 0; }
+h1 { font-family: var(--f-display); font-stretch: 112%; font-weight: 800; font-size: clamp(32px, 5vw, 48px); line-height: 1.05; margin: 0 0 16px; }
+h2 { font-family: var(--f-display); font-stretch: 108%; font-size: 28px; margin: 56px 0 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+h3 { font-size: 18px; margin: 32px 0 8px; }
+p, ul { max-width: 72ch; }
+figure { margin: 20px 0 24px; }
+figure img { max-width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+figcaption { color: var(--muted); font-size: 13px; margin-top: 6px; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 14.5px; display: block; overflow-x: auto; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+th { background: var(--panel-2); font-weight: 600; }
+td:first-child { white-space: nowrap; font-family: var(--f-mono); font-size: 13px; }
+code { font-family: var(--f-mono); font-size: .9em; }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; gap: 0; }
+  #TOC { display: none; }
+  .nav a.l { display: none; }
+  td:first-child { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<nav class="nav"><div class="in">
+  <a class="brand" href="/">DELTAPRINT</a><span class="sp"></span>
+  <a class="l" href="/">Produkt</a>
+  <a class="btn" href="/app/">Otevřít graf</a>
+</div></nav>
+<div class="layout">
+<nav id="TOC" aria-label="Obsah"><ul>
+<li><a href="#rozhraní" id="toc-rozhraní">Rozhraní</a></li>
+<li><a href="#horní-lišta" id="toc-horní-lišta">Horní lišta</a></li>
+<li><a href="#ovládání-grafu" id="toc-ovládání-grafu">Ovládání
+grafu</a></li>
+<li><a href="#footprint" id="toc-footprint">Footprint</a></li>
+<li><a href="#kříž-a-tooltip" id="toc-kříž-a-tooltip">Kříž a
+tooltip</a></li>
+<li><a href="#profil-a-δ-profil-svíčky"
+id="toc-profil-a-δ-profil-svíčky">Profil a Δ Profil svíčky</a></li>
+<li><a href="#vrstvy" id="toc-vrstvy">Vrstvy</a></li>
+<li><a href="#detail-svíčky" id="toc-detail-svíčky">Detail
+svíčky</a></li>
+<li><a href="#tabulka-pod-grafem-a-panel-δoi"
+id="toc-tabulka-pod-grafem-a-panel-δoi">Tabulka pod grafem a panel
+ΔOI</a></li>
+<li><a href="#agregace" id="toc-agregace">Agregace</a></li>
+<li><a href="#nastavení-světlý-režim-a-mobil"
+id="toc-nastavení-světlý-režim-a-mobil">Nastavení, světlý režim a
+mobil</a></li>
+<li><a href="#živá-data-a-časté-otázky"
+id="toc-živá-data-a-časté-otázky">Živá data a časté otázky</a></li>
+</ul></nav>
+<article>
+<h1>Deltaprint – uživatelský manuál</h1>
+<p>Deltaprint je footprint a order-flow graf pro BTCUSDT perpetual na
+Binance Futures. Footprint, delta a všechny metriky se počítají z
+každého aggTrade, stejně pro historii i živou svíčku. Manuál projde
+obrazovku screen po screenu a vysvětlí, co přesně který prvek ukazuje a
+jak je spočítaný. Screeny jsou z ukázkových dat, proto v liště vidíte
+štítek „vzorová data“. V aplikaci uvidíte živý trh.</p>
+<h2 id="rozhraní">Rozhraní</h2>
+<p>Obrazovka má jednu hlavní plochu s footprintem a kolem ní lištu, osy,
+tabulku metrik, panel ΔOI a boční detail vybrané svíčky.</p>
+<figure>
+<a href="img/01-prehled.png"><img src="img/01-prehled.png" alt="Přehled: M5, bin 25 USD, vybraná svíčka 19:40 s detailem vpravo" loading="lazy"></a>
+<figcaption>
+Přehled: M5, bin 25 USD, vybraná svíčka 19:40 s detailem vpravo
+</figcaption>
+</figure>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Zóna</th>
+<th>Co v ní je</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Horní lišta</td>
+<td>agregace, bin, režim buněk, období, vrstvy, profily, imbalance,
+časové pásmo, jednotky ΔOI, motiv, jazyk, nastavení. Vpravo stavový
+řádek: agregace, rozsah načtených dat a aktuální úroveň detailu (buňky +
+čísla / buňky / jen svíčky).</td>
+</tr>
+<tr class="even">
+<td>Šedý řádek nad grafem</td>
+<td>zkrácená nápověda k ovládání.</td>
+</tr>
+<tr class="odd">
+<td>Footprint</td>
+<td>sloupec = svíčka, řádky = cenové úrovně v binu zobrazení. Tenká
+svíčka vlevo od buněk ukazuje OHLC.</td>
+</tr>
+<tr class="even">
+<td>Cenová osa</td>
+<td>poslední cena a štítky vybrané svíčky: <strong>S</strong> a
+<strong>L</strong> jsou hranice horního a spodního knotu (max a min z O,
+C), <strong>vPOC</strong> úroveň s největším objemem,
+<strong>Δ−</strong> a <strong>Δ+</strong> úrovně s nejzápornější a
+nejkladnější deltou. Stejné úrovně jsou ve footprintu orámované a
+hranice knotů vyznačené čárkovaně.</td>
+</tr>
+<tr class="odd">
+<td>Tabulka pod grafem</td>
+<td>Volume, CVD, Delta, Trades a změna OI pro každou svíčku.</td>
+</tr>
+<tr class="even">
+<td>Panel ΔOI</td>
+<td>histogram změny open interestu.</td>
+</tr>
+<tr class="odd">
+<td>Časová osa</td>
+<td>čas v NY nebo UTC, vpravo dole právě zvolené pásmo.</td>
+</tr>
+<tr class="even">
+<td>Boční panel</td>
+<td>rozbor vybrané svíčky, viz kapitola Detail svíčky.</td>
+</tr>
+</tbody>
+</table>
+<p>Vybraná svíčka je podbarvená šedým sloupcem. Křížek v bočním panelu
+panel schová, zpět ho otevřete tlačítkem Detail v liště.</p>
+<h2 id="horní-lišta">Horní lišta</h2>
+<figure>
+<a href="img/02-lista.png"><img src="img/02-lista.png" alt="Horní lišta" loading="lazy"></a>
+<figcaption>
+Horní lišta
+</figcaption>
+</figure>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Prvek</th>
+<th>Co dělá</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Agregace</td>
+<td>typ svíček: M1, M5, M15, volume bary 100 M USD a 1 000 BTC, tick
+bary 5 000 aggTrades. „Vlastní práh…“ otevře pole pro vlastní hodnotu v
+USD, BTC nebo počtu obchodů (viz kapitola Agregace).</td>
+</tr>
+<tr class="even">
+<td>Bin</td>
+<td>výška cenové úrovně ve footprintu: 5, 10, 25, 50 nebo 100 USD. Data
+jsou uložená po 5 USD a do většího binu se sčítají, takže změna binu je
+okamžitá. Na binu závisí i POC a imbalance.</td>
+</tr>
+<tr class="odd">
+<td>Buňka</td>
+<td>co buňky ukazují: delta, sell × buy, nebo volume.</td>
+</tr>
+<tr class="even">
+<td>Od, Do, Načíst</td>
+<td>načte zvolené dny (v zobrazeném časovém pásmu) a celé je zobrazí.
+Enter v poli datumu funguje jako Načíst.</td>
+</tr>
+<tr class="odd">
+<td>Vše</td>
+<td>načte celou dostupnou historii. U jemných agregací může být rozsah
+příliš velký, aplikace pak ukáže výřez kolem středu a zbytek dočítá při
+posunu.</td>
+</tr>
+<tr class="even">
+<td>Vrstvy ▾</td>
+<td>sessions, dny, VWAP a profil viditelného rozsahu (viz kapitola
+Vrstvy). Tlačítko svítí, když je zapnutá aspoň jedna vrstva.</td>
+</tr>
+<tr class="odd">
+<td>Profil, Δ Profil</td>
+<td>volume a delta profil uvnitř každé svíčky.</td>
+</tr>
+<tr class="even">
+<td>Imbalance 300 %</td>
+<td>zapíná zvýraznění imbalancí, číslo je nastavený poměr.</td>
+</tr>
+<tr class="odd">
+<td>NY / UTC</td>
+<td>časové pásmo os, hranic dnů a VWAP. NY sleduje letní čas.</td>
+</tr>
+<tr class="even">
+<td>ΔOI BTC / USD</td>
+<td>jednotky změny open interestu v tabulce a panelu ΔOI.</td>
+</tr>
+<tr class="odd">
+<td>☀ Světlý / ☾ Tmavý, CZ / EN</td>
+<td>motiv a jazyk.</td>
+</tr>
+<tr class="even">
+<td>⚙ Nastavení</td>
+<td>barvy, parametry imbalancí a rozložení panelů.</td>
+</tr>
+</tbody>
+</table>
+<p>Vlevo vedle symbolu je stav živých dat. Na screenu z živého provozu
+vypadá takto:</p>
+<figure>
+<a href="img/14-zive.png"><img src="img/14-zive.png" alt="Štítek živých dat" loading="lazy"></a>
+<figcaption>
+Štítek živých dat
+</figcaption>
+</figure>
+<p>Po najetí myší ukáže, od kdy živá data navazují na historii a jaké je
+aktuální zpoždění. Význam všech stavů je v kapitole Živá data.</p>
+<h2 id="ovládání-grafu">Ovládání grafu</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Akce</th>
+<th>Myš</th>
+<th>Dotyk</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>zoom času kolem kurzoru</td>
+<td>kolečko</td>
+<td>sevření / roztah dvěma prsty</td>
+</tr>
+<tr class="even">
+<td>zoom ceny</td>
+<td>Ctrl, Shift nebo Alt + kolečko, případně kolečko nad cenovou
+osou</td>
+<td>tažení cenové osy</td>
+</tr>
+<tr class="odd">
+<td>posun</td>
+<td>tažení grafu</td>
+<td>tažení prstem</td>
+</tr>
+<tr class="even">
+<td>škálování ceny</td>
+<td>tažení cenové osy nahoru nebo dolů</td>
+<td>totéž</td>
+</tr>
+<tr class="odd">
+<td>šířka svíček</td>
+<td>tažení časové osy doleva nebo doprava</td>
+<td>totéž</td>
+</tr>
+<tr class="even">
+<td>reset</td>
+<td>dvojklik do grafu; dvojklik na ose resetuje jen tu osu</td>
+<td>dvojité klepnutí</td>
+</tr>
+<tr class="odd">
+<td>detail svíčky</td>
+<td>klik na svíčku</td>
+<td>klepnutí</td>
+</tr>
+</tbody>
+</table>
+<p>Svislý posun grafu vypne automatické měřítko ceny, dvojklik ho vrátí.
+Starší data se donačítají po kusech, když posunete graf doleva. Při
+živých datech se graf posouvá za poslední svíčkou.</p>
+<h2 id="footprint">Footprint</h2>
+<p>Každá buňka je jedna cenová úroveň v binu zobrazení. Buy = agresivní
+nákupy (taker buy, obchod na asku), sell = agresivní prodeje (taker
+sell, obchod na bidu), vše v USD notional. Sytost barvy se počítá vůči
+95. percentilu právě viditelných buněk, hodnoty pod 12 % zůstávají bez
+výplně a jen se šedým číslem. Barva tedy ukazuje relativní význam úrovně
+v rámci obrazovky.</p>
+<h3 id="režim-delta">Režim delta</h3>
+<figure>
+<a href="img/03-footprint-delta.png"><img src="img/03-footprint-delta.png" alt="Footprint v režimu delta, M5, bin 10 USD" loading="lazy"></a>
+<figcaption>
+Footprint v režimu delta, M5, bin 10 USD
+</figcaption>
+</figure>
+<p>V buňce je buy − sell. Zelená = převaha agresivních nákupů, červená =
+prodejů. Na screenu je dobře vidět svíčka 19:05 s kladnou deltou skoro
+na všech úrovních a svíčka 19:20 s velkými zápornými úrovněmi (−1.3M,
+−593K) uvnitř těla.</p>
+<h3 id="režim-sell-buy">Režim sell × buy</h3>
+<figure>
+<a href="img/04-footprint-sellbuy.png"><img src="img/04-footprint-sellbuy.png" alt="Footprint v režimu sell × buy" loading="lazy"></a>
+<figcaption>
+Footprint v režimu sell × buy
+</figcaption>
+</figure>
+<p>Levá polovina buňky je sell, pravá buy. Tohle je režim pro čtení
+diagonálních imbalancí a aukce na extrémech, protože vidíte obě strany
+zvlášť. Hodnota 0 na krajní úrovni znamená, že na extrému už nebyla
+protistrana.</p>
+<h3 id="režim-volume">Režim volume</h3>
+<figure>
+<a href="img/05-footprint-volume.png"><img src="img/05-footprint-volume.png" alt="Footprint v režimu volume" loading="lazy"></a>
+<figcaption>
+Footprint v režimu volume
+</figcaption>
+</figure>
+<p>Celkový objem na úrovni (buy + sell), modrá škála. Hodí se pro
+hledání high a low volume nodů uvnitř svíček.</p>
+<h3 id="imbalance">Imbalance</h3>
+<p>Imbalance se značí proužkem na okraji buňky:</p>
+<ul>
+<li><strong>zelený proužek vpravo</strong> = buy imbalance: buy na
+úrovni L ≥ poměr × sell na úrovni L − bin,</li>
+<li><strong>červený proužek vlevo</strong> = sell imbalance: sell na
+úrovni L ≥ poměr × buy na úrovni L + bin.</li>
+</ul>
+<p>Agresivní strana musí mít na úrovni aspoň nastavené minimum (výchozí
+50 000 USD), aby slabé úrovně nedávaly falešné signály. Stacked
+imbalance = aspoň 3 imbalance stejné strany za sebou. Poměr, minimum i
+délku stacku změníte v Nastavení. Imbalance se počítá v binu zobrazení,
+takže při binu 10 a 50 USD může vyjít jinak.</p>
+<h3 id="úrovně-detailu">Úrovně detailu</h3>
+<p>Podle zoomu aplikace přepíná buňky s čísly, jen barevné buňky a jen
+svíčky. Aktuální stav je napsaný vpravo ve stavovém řádku. Když čísla
+nevidíte, přibližte čas, cenu, nebo zvolte větší bin.</p>
+<h2 id="kříž-a-tooltip">Kříž a tooltip</h2>
+<figure>
+<a href="img/06-tooltip.png"><img src="img/06-tooltip.png" alt="Tooltip nad úrovní 79 470 svíčky 19:05" loading="lazy"></a>
+<figcaption>
+Tooltip nad úrovní 79 470 svíčky 19:05
+</figcaption>
+</figure>
+<p>Při pohybu myši graf ukazuje kříž s cenou kurzoru na cenové ose a
+tooltip svíčky pod kurzorem:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Řádek</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>2026-10-18 19:05 EDT</td>
+<td>čas otevření svíčky ve zvoleném pásmu</td>
+</tr>
+<tr class="even">
+<td>O, H, L, C</td>
+<td>open, high, low, close</td>
+</tr>
+<tr class="odd">
+<td>Vol</td>
+<td>objem v USD a v BTC</td>
+</tr>
+<tr class="even">
+<td>Delta</td>
+<td>delta svíčky v USD a v BTC</td>
+</tr>
+<tr class="odd">
+<td>Trades</td>
+<td>počet aggTrades</td>
+</tr>
+<tr class="even">
+<td>Dur</td>
+<td>délka svíčky (u volume a tick barů se liší svíčka od svíčky)</td>
+</tr>
+<tr class="odd">
+<td>ΔOI</td>
+<td>změna open interestu za svíčku v BTC a USD</td>
+</tr>
+<tr class="even">
+<td>poslední řádek</td>
+<td>úroveň pod kurzorem: cena, buy, sell a její delta</td>
+</tr>
+</tbody>
+</table>
+<p>Na screenu je úroveň 79 470 s buy 1.5M proti sell 566K, tedy delta
++908K, nejsilnější úroveň celé svíčky.</p>
+<h2 id="profil-a-δ-profil-svíčky">Profil a Δ Profil svíčky</h2>
+<figure>
+<a href="img/07-profily.png"><img src="img/07-profily.png" alt="Zapnutý Profil (žlutý) i Δ Profil (fialový)" loading="lazy"></a>
+<figcaption>
+Zapnutý Profil (žlutý) i Δ Profil (fialový)
+</figcaption>
+</figure>
+<ul>
+<li><strong>Profil</strong> (žlutá křivka, ve světlém režimu tmavě
+oranžová): rozložení objemu po úrovních svíčky, normované na její
+nejsilnější úroveň. Tečka označuje vPOC. Na první pohled je vidět,
+jestli se obchodovalo hlavně v těle, nebo v knotu.</li>
+<li><strong>Δ Profil</strong> (fialová křivka): delta kolem svislé
+nulové osy uprostřed buňky, doprava nákupy, doleva prodeje. Zelená tečka
+= úroveň s nejkladnější deltou (Δ+), červená = s nejzápornější
+(Δ−).</li>
+</ul>
+<p>Oba profily jdou zapnout nezávisle, fungují ve všech režimech buněk a
+počítají se v binu zobrazení. Zobrazí se, jen když jsou vidět buňky.</p>
+<h2 id="vrstvy">Vrstvy</h2>
+<p>Tlačítko Vrstvy ▾ otevře nabídku s kontextem nad jednotlivé svíčky.
+Každou vrstvu zapínáte zvlášť a prohlížeč si volbu pamatuje.</p>
+<figure>
+<a href="img/08-vrstvy-pop.png"><img src="img/08-vrstvy-pop.png" alt="Nabídka Vrstvy" loading="lazy"></a>
+<figcaption>
+Nabídka Vrstvy
+</figcaption>
+</figure>
+<figure>
+<a href="img/08-vrstvy.png"><img src="img/08-vrstvy.png" alt="M15 se zapnutými pásy sessions, high/low sessions a dne, VWAP a profilem viditelného rozsahu" loading="lazy"></a>
+<figcaption>
+M15 se zapnutými pásy sessions, high/low sessions a dne, VWAP a profilem
+viditelného rozsahu
+</figcaption>
+</figure>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Vrstva</th>
+<th>Co ukazuje</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Sessions: pásy</td>
+<td>podbarvení času session s názvem u spodního okraje. Asia
+18:00–03:00, London 03:00–08:00, New York 08:00–17:00, vše čas NY včetně
+letního času. Session přes půlnoc patří dni, ve kterém končí.</td>
+</tr>
+<tr class="even">
+<td>Sessions: high / low</td>
+<td>tečkované čáry přes celou session s popiskem session, H nebo L a
+ceny.</td>
+</tr>
+<tr class="odd">
+<td>Sessions: volume / delta profil</td>
+<td>volume profil ukotvený na začátek session (POC zvýrazněný), delta
+profil s nulovou osou u jejího konce, nákupy doprava zeleně, prodeje
+doleva červeně.</td>
+</tr>
+<tr class="even">
+<td>Dny: high / low, volume / delta profil</td>
+<td>totéž pro kalendářní den ve zvoleném pásmu (NY nebo UTC).</td>
+</tr>
+<tr class="odd">
+<td>VWAP (den)</td>
+<td>objemem vážená průměrná cena od začátku dne, čárkovaná čára.</td>
+</tr>
+<tr class="even">
+<td>Profil viditelného rozsahu</td>
+<td>volume profil právě zobrazeného výřezu u pravého okraje grafu, s POC
+a value area 70 % (VAH a VAL se štítky na cenové ose). Přepočítá se při
+každém posunu a zoomu.</td>
+</tr>
+</tbody>
+</table>
+<p>Profily sessions a dnů mají šířku úměrnou délce období a při velkém
+oddálení se skryjí. Vrstvy fungují nad všemi agregacemi včetně volume a
+tick barů.</p>
+<h2 id="detail-svíčky">Detail svíčky</h2>
+<p>Klik na svíčku otevře v bočním panelu její kompletní rozbor. Všechny
+hodnoty se počítají z jednotlivých aggTrades, ne z buněk footprintu,
+takže nezávisí na zvoleném binu (kromě extrémů, které mají pevný bucket
+5 USD). Knot je část svíčky striktně pod min(O, C) (spodní, long strana)
+nebo nad max(O, C) (horní, short strana). Označení (K) znamená „v
+knotu“.</p>
+<figure>
+<a href="img/09-detail.png"><img src="img/09-detail.png" alt="Boční panel s detailem svíčky 19:40" loading="lazy"></a>
+<figcaption>
+Boční panel s detailem svíčky 19:40
+</figcaption>
+</figure>
+<h3 id="svíčka">Svíčka</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Řádek</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>O / H, L / C</td>
+<td>OHLC</td>
+</tr>
+<tr class="even">
+<td>Volume</td>
+<td>objem v USD notional a v BTC</td>
+</tr>
+<tr class="odd">
+<td>Buy / Sell</td>
+<td>agresivní nákupy a prodeje v USD</td>
+</tr>
+<tr class="even">
+<td>Delta</td>
+<td>buy − sell v USD a delta / volume (−1 až +1)</td>
+</tr>
+<tr class="odd">
+<td>CVD</td>
+<td>kumulativní delta, denně se nuluje v 00:00 UTC</td>
+</tr>
+<tr class="even">
+<td>Barva · close pos</td>
+<td>barva svíčky a pozice close v range: (C − L) / (H − L), 0 = close na
+low, 1 = na high</td>
+</tr>
+<tr class="odd">
+<td>Trades, Duration</td>
+<td>počet aggTrades a délka svíčky</td>
+</tr>
+<tr class="even">
+<td>ΔOI</td>
+<td>změna open interestu mezi 5min snapshoty Binance (BTC / USD). Kde
+svíčka neobsahuje hranici snapshotu, je prázdná.</td>
+</tr>
+<tr class="odd">
+<td>Vol / medián času dne</td>
+<td>objem vůči mediánu objemu ve stejném čase NY za posledních 20 dní.
+Odliší výjimečný objem od běžného otevření session.</td>
+</tr>
+<tr class="even">
+<td>z(ln Vol_USD), N=30</td>
+<td>z-score logaritmu objemu vůči 30 předchozím svíčkám. U volume barů
+místo toho z rychlosti, jakou objem přichází.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="spodní-knot-long-a-horní-knot-short">Spodní knot (long) a Horní
+knot (short)</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Řádek</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Vol(K)</td>
+<td>objem v knotu v USD a BTC</td>
+</tr>
+<tr class="even">
+<td>Buy(K) / Sell(K)</td>
+<td>agresivní nákupy a prodeje v knotu</td>
+</tr>
+<tr class="odd">
+<td>podíl objemu</td>
+<td>jaká část objemu svíčky proběhla v knotu</td>
+</tr>
+<tr class="even">
+<td>podíl na range</td>
+<td>délka knotu / range svíčky</td>
+</tr>
+<tr class="odd">
+<td>koncentrace</td>
+<td>podíl objemu / podíl na range. Nad 1 se v knotu obchodovalo hustěji
+než v průměru svíčky.</td>
+</tr>
+<tr class="even">
+<td>Δ(K) · Δ(K)/Vol(K)</td>
+<td>delta v knotu a její poměr k objemu knotu</td>
+</tr>
+<tr class="odd">
+<td>sell v knotu / sell (buy v knotu / buy)</td>
+<td>jaká část všech agresivních prodejů (nákupů) svíčky proběhla v
+knotu</td>
+</tr>
+</tbody>
+</table>
+<p>Typická absorpce na low: vysoké z, velký podíl objemu a koncentrace
+nad 1 ve spodním knotu, záporné Δ(K) a vysoký podíl sell v knotu, close
+pos blízko 1.</p>
+<h3 id="průběh-delty-uvnitř-svíčky">Průběh delty uvnitř svíčky</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Řádek</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>min / max kum. delta</td>
+<td>nejnižší a nejvyšší hodnota kumulativní delty během svíčky</td>
+</tr>
+<tr class="even">
+<td>návrat od min (long)</td>
+<td>o kolik se delta vrátila od minima do close, v USD a v procentech
+minima</td>
+</tr>
+<tr class="odd">
+<td>pokles od max (short)</td>
+<td>zrcadlově od maxima</td>
+</tr>
+<tr class="even">
+<td>low / high v čase</td>
+<td>kdy během svíčky vzniklo low a high (0 % = na otevření, 100 % = na
+close)</td>
+</tr>
+<tr class="odd">
+<td>min / max delty v čase</td>
+<td>kdy vzniklo minimum a maximum delty</td>
+</tr>
+</tbody>
+</table>
+<p>Když minimum delty vznikne ve stejné chvíli jako low a delta se pak
+vrátí, prodejci tlačili do low a byli absorbováni. Poměr návratu se
+skryje, je-li extrém delty menší než 1 % objemu svíčky.</p>
+<h3 id="extrémy-5-usd-bucket">Extrémy (5 USD bucket)</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Řádek</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>aukce low: buy / sell</td>
+<td>objem nákupů a prodejů v nejnižším 5USD bucketu. Obě strany nenulové
+= <strong>nedokončená</strong> aukce (trh má tendenci se k extrému
+vrátit), jedna strana nulová = <strong>dokončená</strong>.</td>
+</tr>
+<tr class="even">
+<td>aukce high: buy / sell</td>
+<td>totéž pro nejvyšší bucket</td>
+</tr>
+<tr class="odd">
+<td>vyčerpání low / high: 1 / 2 buckety vs POC</td>
+<td>objem krajního bucketu (a dvou krajních) jako násobek objemu POC
+bucketu. Malé číslo (např. 0.01×) = na extrému už skoro nikdo
+neobchodoval, tlak se vyčerpal.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="knoty-spodní-horní">Knoty (spodní / horní)</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Řádek</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>imbalance buy / sell (stack) ≥ 3:1</td>
+<td>počet imbalancí v knotu, v závorce nejdelší stack</td>
+</tr>
+<tr class="even">
+<td>úsilí: USD / 1 USD pohybu</td>
+<td>kolik USD se zobchodovalo na 1 USD pohybu ceny v knotu (effort vs.
+result). „… vs tělo“ = násobek úsilí v těle. Velké úsilí s malým pohybem
+= někdo stojí proti.</td>
+</tr>
+<tr class="odd">
+<td>velké obchody ≥ 5 BTC</td>
+<td>podíl objemu knotu z velkých aggTrades, v závorce jejich počet</td>
+</tr>
+<tr class="even">
+<td>… velké proti směru</td>
+<td>podíl velkých prodejů ve spodním knotu, velkých nákupů v horním</td>
+</tr>
+<tr class="odd">
+<td>prům. obchod, obchody / s</td>
+<td>průměrná velikost obchodu a tempo obchodování v knotu, „… vs tělo“
+vůči tělu svíčky</td>
+</tr>
+<tr class="even">
+<td>čas v knotu</td>
+<td>jakou část trvání svíčky byla cena v knotu</td>
+</tr>
+</tbody>
+</table>
+<p>Pod tabulkou je pro srovnání řádek těla: průměrný obchod, obchody za
+sekundu a úsilí.</p>
+<h3 id="open-interest">Open interest</h3>
+<p>ΔOI / volume ukazuje změnu open interestu jako procento objemu
+svíčky. Klesající OI = zavírání pozic nebo likvidace, rostoucí =
+otevírání nových pozic.</p>
+<p>Hodnota „málo historie“ znamená, že metrika potřebuje delší historii
+(z-score 30 svíček, objem vůči času dne 20 dní). U dnešních živých
+svíček doplní z-score, objem vůči času dne a ΔOI až denní
+aktualizace.</p>
+<h2 id="tabulka-pod-grafem-a-panel-δoi">Tabulka pod grafem a panel
+ΔOI</h2>
+<p>Pod footprintem běží tabulka statistik zarovnaná se svíčkami a pod ní
+histogram změny open interestu. Obojí se posouvá a zoomuje spolu s
+grafem, takže každý sloupec patří svíčce nad ním.</p>
+<figure>
+<a href="img/10-tabulka.png"><img src="img/10-tabulka.png" alt="Tabulka statistik a panel ΔOI pod grafem" loading="lazy"></a>
+<figcaption>
+Tabulka statistik a panel ΔOI pod grafem
+</figcaption>
+</figure>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Řádek</th>
+<th>Co ukazuje</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Volume</td>
+<td>objem svíčky v USD. Sytost modré roste s objemem, nadprůměrné svíčky
+vyniknou na první pohled.</td>
+</tr>
+<tr class="even">
+<td>CVD</td>
+<td>kumulativní delta od 00:00 UTC. Zelená = kladná, červená = záporná.
+Divergence CVD proti ceně (nové low bez nového minima CVD) je klasický
+signál vyčerpání.</td>
+</tr>
+<tr class="odd">
+<td>Delta</td>
+<td>buy − sell svíčky</td>
+</tr>
+<tr class="even">
+<td>Trades</td>
+<td>počet aggTrades. Hodně obchodů při malém objemu = retail, málo
+obchodů s velkým objemem = velcí hráči.</td>
+</tr>
+<tr class="odd">
+<td>OI Δ</td>
+<td>změna open interestu za svíčku v BTC nebo USD (přepíná se v
+liště)</td>
+</tr>
+</tbody>
+</table>
+<p>Panel ΔOI kreslí totéž jako sloupce: zelený = OI roste, nové pozice
+se otevírají; červený = OI klesá, pozice se zavírají nebo likvidují.
+Popisky vpravo ukazují rozsah osy. Čtení v kombinaci s cenou a
+deltou:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Cena</th>
+<th>ΔOI</th>
+<th>Typický výklad</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>roste</td>
+<td>roste</td>
+<td>nové longy, trend má palivo</td>
+</tr>
+<tr class="even">
+<td>roste</td>
+<td>klesá</td>
+<td>short squeeze nebo vybrání zisků, slabší pohyb</td>
+</tr>
+<tr class="odd">
+<td>klesá</td>
+<td>roste</td>
+<td>nové shorty</td>
+</tr>
+<tr class="even">
+<td>klesá</td>
+<td>klesá</td>
+<td>likvidace longů, často kapitulační low</td>
+</tr>
+</tbody>
+</table>
+<p>OI přichází z Binance v 5min snapshotech, takže na M1 nebo u krátkých
+range barů mají hodnotu jen svíčky obsahují hranici snapshotu. Tabulku i
+panel lze vypnout v Nastavení → Rozložení.</p>
+<h2 id="agregace">Agregace</h2>
+<p>Agregace určuje, kdy se zavře svíčka. Vybírá se v liště, data se
+přepočítají z jednotlivých obchodů, takže každá varianta je přesná, ne
+odvozená z jiného timeframu.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Typ</th>
+<th>Volby</th>
+<th>Kdy použít</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Časová</td>
+<td>M1, M5, M15</td>
+<td>klasický pohled, srovnání se session a s jinými platformami</td>
+</tr>
+<tr class="even">
+<td>Objemová (USD)</td>
+<td>100M USD</td>
+<td>každá svíčka má stejný notional. V rychlém trhu vzniká hodně svíček,
+v klidu málo. Odfiltruje šum mrtvých hodin.</td>
+</tr>
+<tr class="odd">
+<td>Objemová (BTC)</td>
+<td>1 000 BTC</td>
+<td>totéž v BTC, nezávislé na ceně</td>
+</tr>
+<tr class="even">
+<td>Ticková</td>
+<td>5 000 ticků</td>
+<td>svíčka po 5 000 aggTrades. Reaguje na aktivitu, ne na velikost
+obchodů.</td>
+</tr>
+<tr class="odd">
+<td>Vlastní práh</td>
+<td>libovolná hodnota v USD, BTC nebo tickách</td>
+<td>vlastní velikost range barů. Práh se spočítá nad celou historií a
+uloží, první výpočet chvíli trvá (průběh vidíte v liště).</td>
+</tr>
+</tbody>
+</table>
+<p>U objemových a tickových svíček mají všechny svíčky srovnatelnou
+váhu, takže se lépe porovnává delta a imbalance mezi nimi. Trvání svíčky
+(Duration v detailu) pak samo o sobě říká, jak rychle trh obchoduje.
+Z-score v detailu se u nich počítá z rychlosti přítoku objemu místo ze
+samotného objemu.</p>
+<p>Pro příliš dlouhý rozsah Od–Do na jemné agregaci aplikace zobrazí
+výsek kolem středu a další data dočte při posunu grafu.</p>
+<h2 id="nastavení-světlý-režim-a-mobil">Nastavení, světlý režim a
+mobil</h2>
+<p>Tlačítko Nastavení v liště otevře panel s barvami, prahy imbalancí a
+rozložením. Všechno se ukládá v prohlížeči, při příští návštěvě najdete
+graf tak, jak jste ho opustili.</p>
+<figure>
+<a href="img/11-nastaveni-pop.png"><img src="img/11-nastaveni-pop.png" alt="Panel Nastavení" loading="lazy"></a>
+<figcaption>
+Panel Nastavení
+</figcaption>
+</figure>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Skupina</th>
+<th>Položka</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Barvy</td>
+<td>buy, sell, imbalance, pozadí…</td>
+<td>vlastní barvy buněk a zvýraznění</td>
+</tr>
+<tr class="even">
+<td>Imbalance</td>
+<td>poměr (300 %)</td>
+<td>buy na úrovni musí být aspoň 3× větší než sell o bin níž (a
+zrcadlově), aby buňka byla imbalance</td>
+</tr>
+<tr class="odd">
+<td>Imbalance</td>
+<td>minimum (50 000 USD)</td>
+<td>menší objemy se ignorují, aby třeba 3 USD proti 1 USD nebyly
+imbalance</td>
+</tr>
+<tr class="even">
+<td>Imbalance</td>
+<td>stacked (3)</td>
+<td>kolik imbalancí za sebou se označí jako stack</td>
+</tr>
+<tr class="odd">
+<td>Rozložení</td>
+<td>boční panel, tabulka, panel ΔOI</td>
+<td>zapnutí a vypnutí jednotlivých částí obrazovky. Vypnutím získáte víc
+místa pro graf.</td>
+</tr>
+<tr class="even">
+<td>Výchozí</td>
+<td></td>
+<td>vrátí všechno na výchozí hodnoty</td>
+</tr>
+</tbody>
+</table>
+<p>Pokud obchodujete agresivnější setupy, snižte poměr na 200–250 %,
+uvidíte víc imbalancí. Pro čistší graf v rušné NY session zvyšte
+minimum.</p>
+<h3 id="světlý-režim">Světlý režim</h3>
+<p>Přepínač ☀ / ☾ v liště mezi tmavým a světlým režimem. Barvy buněk i
+vrstev se přizpůsobí, význam zůstává stejný.</p>
+<figure>
+<a href="img/12-svetly.png"><img src="img/12-svetly.png" alt="Footprint ve světlém režimu" loading="lazy"></a>
+<figcaption>
+Footprint ve světlém režimu
+</figcaption>
+</figure>
+<h3 id="mobil-a-tablet">Mobil a tablet</h3>
+<p>Na úzké obrazovce zůstane v liště jen symbol, agregace a bin, ostatní
+ovládání (vrstvy, nastavení, režim buněk, rozsah) schová tlačítko ☰.
+Graf se posouvá tahem prstu a čas se zoomuje dvěma prsty. Klepnutí na
+svíčku vysune detail zprava přes graf. Tabulka a panel ΔOI zůstávají pod
+grafem.</p>
+<figure>
+<a href="img/13-mobil.png"><img src="img/13-mobil.png" alt="Aplikace na mobilu, šířka 390 px" loading="lazy"></a>
+<figcaption>
+Aplikace na mobilu, šířka 390 px
+</figcaption>
+</figure>
+<h2 id="živá-data-a-časté-otázky">Živá data a časté otázky</h2>
+<p>Data přicházejí živě z veřejného WebSocketu Binance (BTCUSDT
+perpetual), poslední svíčka se dopočítává s každým obchodem. Stav
+ukazuje štítek vpravo v liště, po najetí myší uvidíte, odkud živá data
+běží a jaké je zpoždění.</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Štítek</th>
+<th>Význam</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>živě</td>
+<td>připojeno, svíčky se aktualizují v reálném čase</td>
+</tr>
+<tr class="even">
+<td>doplňuji</td>
+<td>po výpadku spojení se dohrávají chybějící obchody, nic se
+neztratí</td>
+</tr>
+<tr class="odd">
+<td>připojuji / startuji</td>
+<td>spojení se navazuje</td>
+</tr>
+<tr class="even">
+<td>vzorová data</td>
+<td>zobrazená jsou syntetická data, ne skutečný trh</td>
+</tr>
+</tbody>
+</table>
+<p>Historie se jednou denně (09:30 UTC) srovná s oficiálními denními
+soubory Binance. Teprve pak mají dnešní svíčky dopočítané ΔOI, z-score a
+objem vůči času dne.</p>
+<h3 id="časté-otázky">Časté otázky</h3>
+<p><strong>Proč se čísla liší od jiné platformy?</strong> Delta se
+počítá z příznaku agresora v každém aggTrade Binance futures, ne z
+odhadu podle tick rule. Jiné platformy často agregují víc burz nebo
+spot, nebo používají jinou hranici dne pro CVD (zde 00:00 UTC).</p>
+<p><strong>Proč některé buňky nemají čísla?</strong> Graf je oddálený.
+Přibližte čas (kolečko) nebo cenu (Ctrl + kolečko), případně zvětšete
+bin.</p>
+<p><strong>Proč je ΔOI prázdné?</strong> Svíčka neobsahuje hranici 5min
+snapshotu OI, nebo jde o dnešní data před denní aktualizací.</p>
+<p><strong>V jakém čase jsou osy?</strong> Časová osa a session jsou v
+čase New Yorku (EDT/EST, s letním časem), denní hranice CVD v UTC.</p>
+<p><strong>Kde se nastavení ukládá?</strong> V prohlížeči. Na jiném
+zařízení nebo v anonymním okně začínáte s výchozím nastavením.</p>
+<p><strong>Je to investiční doporučení?</strong> Ne. Deltaprint je
+analytický nástroj, rozhodnutí o obchodu je na vás.</p>
+</article>
+</div>
+</body>
+</html>
