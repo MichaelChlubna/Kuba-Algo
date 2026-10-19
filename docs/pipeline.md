@@ -1,4 +1,4 @@
-# BTCUSDT perp – footprint pipeline a viewer
+# Deltaprint – BTCUSDT perp footprint pipeline a viewer
 
 > Hotové kroky 1–6 (data, časové svíčky + validace, features knotů, footprint + OI, viewer, objemové svíčky). Zbývá: rozšíření na 3 měsíce dat.
 > Detektor absorpce (podmínky V1–P2, signály, export) byl 2026-10-16 odstraněn; features, ze kterých počítal, zůstávají v series.

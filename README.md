@@ -1,4 +1,4 @@
-# BTCUSDT perp – footprint (webová aplikace)
+# Deltaprint – BTCUSDT perp footprint (webová aplikace)
 
 Footprint / order-flow viewer pro BTCUSDT perpetual (Binance USDⓈ-M). Backend v Pythonu stahuje denní
 aggTrades a open interest z data.binance.vision, staví svíčky, footprint a metriky a servíruje je přes API.
