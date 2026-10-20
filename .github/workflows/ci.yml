@@ -48,6 +48,8 @@ jobs:
           docker compose up -d web
           for i in $(seq 1 30); do curl -fsS localhost:8000/api/health && break; sleep 2; done
           curl -fsS localhost:8000/api/meta > /dev/null
-          curl -fsS localhost:8000/ | grep -q "<title>"
+          curl -fsS localhost:8000/ | grep -q "<title>Deltaprint"
+          curl -fsS localhost:8000/manual/ | grep -q "<title>Deltaprint"
+          curl -fsSL localhost:8000/app | grep -q '<div id="root">'
       - if: always()
         run: docker compose logs web; docker compose down -v

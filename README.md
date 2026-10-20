@@ -15,7 +15,7 @@ Potřeba: Docker (Docker Desktop na Windows / Macu).
 
 ```bash
 cp .env.example .env              # volitelné: heslo, port, čas aktualizace
-docker compose up -d --build      # web na http://localhost:8000 + denní aktualizace dat + živá data
+docker compose up -d --build      # web na http://localhost:8000 (produktová stránka, graf na /app/) + aktualizace dat + živá data
 ```
 
 Při prvním startu je složka dat prázdná. Služba `updater` hned stáhne posledních 30 dní (pár minut,
@@ -44,16 +44,18 @@ docker compose down -v                         # zastavení a smazání dat
 
 ## Provoz na veřejném serveru
 
+Na adrese `/` je produktová stránka Deltaprint (`site/index.html`), na `/manual/` uživatelský manuál
+(`site/manual/`) a samotný graf na `/app/`. Vše je veřejné, bez přihlašování.
+
 Compose ve výchozím stavu poslouchá jen na `127.0.0.1`. Pro přístup zvenku nastavte v `.env`:
 
 ```bash
 FP_BIND=0.0.0.0
-FP_AUTH_USER=jmeno
-FP_AUTH_PASSWORD=dlouhe-heslo
 ```
 
-Aplikace pak vyžaduje HTTP Basic přihlášení (kromě `/api/health`). Basic auth posílá heslo v každém
-požadavku, takže před ni patří HTTPS (reverzní proxy, např. Caddy nebo nginx s Let's Encrypt).
+Před server patří HTTPS (reverzní proxy, např. Caddy nebo nginx s Let's Encrypt). Kdybyste přístup
+někdy chtěli omezit, `FP_AUTH_USER` a `FP_AUTH_PASSWORD` zapnou HTTP Basic přihlášení pro celý web
+(kromě `/api/health`).
 
 ## Zdroj dat a klíče
 
@@ -93,13 +95,13 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m fp sample          # nebo: python -m fp update (skutečná data)
 python -m fp serve
 
-# frontend (Vite s hot reloadem na http://localhost:5173, /api se přeposílá na backend)
+# frontend (Vite s hot reloadem na http://localhost:5173/app/, /api se přeposílá na backend)
 cd frontend
 npm ci
 npm run dev
 ```
 
-`npm run build` sestaví frontend do `frontend/dist`, odkud ho `python -m fp serve` servíruje sám
+`npm run build` sestaví frontend do `frontend/dist`, odkud ho `python -m fp serve` servíruje sám na `/app/`
 (jiný backend pro dev server: `FP_BACKEND=http://host:port npm run dev`).
 
 Testy:
@@ -139,4 +141,4 @@ data.binance.vision ──► fp download / convert ──► data/parquet (po d
 | `docs/` | [metodika](docs/metodika.md) (výpočty, features, metriky), [pipeline](docs/pipeline.md), původní zadání |
 
 Proměnné prostředí backendu: `FP_DATA_DIR`, `FP_HOST`, `FP_PORT`, `FP_RETENTION_DAYS`, `FP_AUTH_USER`,
-`FP_AUTH_PASSWORD`, `FP_STATIC_DIR`, `FP_CONFIG` (`backend/fp/config.py`, `server.py`).
+`FP_AUTH_PASSWORD`, `FP_STATIC_DIR`, `FP_SITE_DIR`, `FP_CONFIG` (`backend/fp/config.py`, `server.py`).

@@ -53,3 +53,30 @@ def test_light_full_and_detail(tmp_path):
     assert set(light["cols"]) <= set(full["cols"]) | {"cid"}
     one = c.get("/api/candle", params={"agg": "5m", "cid": D0 + 300_000, "start_ts": D0 + 300_000}).json()
     assert one["n"] == 1 and one["cols"]["start_ts"] == [D0 + 300_000]
+
+
+def test_site_at_root_and_app_under_prefix(tmp_path, monkeypatch):
+    import fp.server
+    site, static = tmp_path / "site", tmp_path / "dist"
+    (site / "manual").mkdir(parents=True)
+    (site / "index.html").write_text("product")
+    (site / "manual" / "index.html").write_text("manual")
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("spa")
+    (static / "assets" / "a.js").write_text("js")
+    (tmp_path / "secret.txt").write_text("no")
+    monkeypatch.setattr(fp.server, "SITE", site)
+    monkeypatch.setattr(fp.server, "STATIC", static)
+    c = TestClient(create_app(make_cfg(tmp_path)))
+
+    assert c.get("/").text == "product"
+    assert c.get("/manual/").text == "manual"
+    r = c.get("/manual", follow_redirects=False)
+    assert r.status_code in (301, 302, 307) and r.headers["location"] == "/manual/"
+    assert c.get("/app").text == "spa"
+    assert c.get("/app/").text == "spa"
+    assert c.get("/app/some/route").text == "spa"
+    assert c.get("/app/assets/a.js").text == "js"
+    assert c.get("/missing.html").status_code == 404
+    assert c.get("/..%2Fsecret.txt").status_code == 404
+    assert c.get("/api/meta").status_code == 200
