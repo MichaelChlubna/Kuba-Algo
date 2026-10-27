@@ -57,6 +57,17 @@ Před server patří HTTPS (reverzní proxy, např. Caddy nebo nginx s Let's Enc
 někdy chtěli omezit, `FP_AUTH_USER` a `FP_AUTH_PASSWORD` zapnou HTTP Basic přihlášení pro celý web
 (kromě `/api/health`).
 
+### Coolify (VPS)
+
+Pro [Coolify](https://coolify.io) je připravený `docker-compose.coolify.yml`: stejné služby `web` a `updater`
+bez publikovaného portu (doménu a HTTPS řeší proxy Coolify) a bez `init` se vzorovými daty.
+
+1. New Resource → Public Repository `https://github.com/MichaelChlubna/Kuba-Algo`, větev `main`,
+   Build Pack **Docker Compose**, Docker Compose Location `/docker-compose.coolify.yml`.
+2. U služby `web` nastavte doménu s portem kontejneru, např. `https://app.3dcap.cz:8000`.
+3. Proměnné (volitelné): `FP_RETENTION_DAYS`, `FP_UPDATE_AT`, `FP_LIVE`, případně `FP_AUTH_USER`/`FP_AUTH_PASSWORD`.
+4. Data zůstávají ve volume `fp-data` i při novém nasazení.
+
 ## Zdroj dat a klíče
 
 Historie jsou veřejné denní soubory z https://data.binance.vision (aggTrades, metrics s open interest),

@@ -1,0 +1,35 @@
+# Compose for Coolify (Docker Compose build pack, compose path /docker-compose.coolify.yml).
+# Same services as docker-compose.yml, but no host port: Coolify's proxy routes the domain set on
+# the `web` service (e.g. https://app.3dcap.cz:8000 = container port 8000) and issues the certificate.
+# No `init` service: production always downloads real data, never synthetic samples.
+
+x-app: &app
+  build: .
+  volumes:
+    - fp-data:/data
+  restart: unless-stopped
+
+services:
+  web:
+    <<: *app
+    command: ["serve"]
+    environment:
+      FP_LIVE: "${FP_LIVE:-1}"
+      FP_RETENTION_DAYS: "${FP_RETENTION_DAYS:-30}"
+      FP_BIND: "0.0.0.0"   # only for the startup warning about missing auth
+      FP_AUTH_USER: "${FP_AUTH_USER:-}"
+      FP_AUTH_PASSWORD: "${FP_AUTH_PASSWORD:-}"
+    expose:
+      - "8000"
+
+  # downloads + builds the last FP_RETENTION_DAYS days now, then daily at FP_UPDATE_AT (UTC)
+  updater:
+    <<: *app
+    command: ["schedule", "--at", "${FP_UPDATE_AT:-09:30}"]
+    environment:
+      FP_RETENTION_DAYS: "${FP_RETENTION_DAYS:-30}"
+    healthcheck:
+      disable: true
+
+volumes:
+  fp-data:
