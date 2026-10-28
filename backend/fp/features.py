@@ -112,6 +112,7 @@ def add_oi_delta(df: pl.DataFrame, oi: pl.DataFrame) -> pl.DataFrame:
 
     oi: columns oi_time (ms, effective snapshot time), oi_btc, oi_usd; sorted by oi_time.
     Candles without a snapshot boundary inside (start, end] get null (no interpolation).
+    oi_end / oi_end_usd: open interest of the last snapshot <= end (the OI line of the chart).
     """
     oi = oi.sort("oi_time")
     snap = oi.select(pl.col("oi_time").alias("_t"), pl.col("oi_btc").alias("_b"), pl.col("oi_usd").alias("_u"), pl.col("oi_time").alias("_st"))
@@ -125,4 +126,5 @@ def add_oi_delta(df: pl.DataFrame, oi: pl.DataFrame) -> pl.DataFrame:
         d_oi=pl.when(has).then(pl.col("_eb") - pl.col("_sb")),
         d_oi_usd=pl.when(has).then(pl.col("_eu") - pl.col("_su")),
         oi_end=pl.col("_eb"),
+        oi_end_usd=pl.col("_eu"),
     ).sort("_i").drop("_i", "_sb", "_su", "_sst", "_eb", "_eu", "_est")

@@ -79,6 +79,8 @@ export interface Candle {
   trades: number;
   d_oi: number | null; // null = no 5-min OI snapshot boundary inside the candle
   d_oi_usd: number | null;
+  oi_end?: number | null; // open interest (BTC) of the last 5-min snapshot <= candle end
+  oi_end_usd?: number | null;
   /** POC levels (lower bucket edge) per bin b in {5,10,25,50,100}: vpoc_b, dpoc_neg_b, dpoc_pos_b */
   [poc: `${'vpoc' | 'dpoc_neg' | 'dpoc_pos'}_${number}`]: number | null;
 }

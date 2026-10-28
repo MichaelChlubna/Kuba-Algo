@@ -8,7 +8,9 @@ REST endpoint, new trades come from the WebSocket. No API key is needed.
 LiveBuilder computes candles with the same functions as the batch build (build_day, build_volume_agg),
 incrementally: closed candles are cached, only open candles are recomputed. Volume and tick candles
 continue from the stored state of the last built day, so they get the same ids as the later batch build.
-Range features that need history (z-scores, time-of-day volume, ΔOI) are left empty for live candles.
+Range features that need history (z-scores, time-of-day volume) are left empty for live candles.
+Open interest comes from the public REST endpoint openInterestHist (the same 5-min snapshots as the
+daily metrics dumps), so live candles get ΔOI and the OI line like the built days.
 
 When the daily update builds a new day, the live state re-anchors on it and drops the trades it covers.
 """
@@ -25,18 +27,20 @@ from pathlib import Path
 
 import polars as pl
 
-from .build import available_days, derived_path, load_trades, time_candles_with_features, time_footprint
+from .build import available_days, derived_path, load_oi, load_trades, time_candles_with_features, time_footprint
 from .candles import TIMEFRAMES_MS, add_cvd, local_time
 from .convert import parquet_path
-from .features import static_features, wick_components
+from .features import add_oi_delta, static_features, wick_components
 from .footprint import footprint, poc_features
-from .metrics import add_candle_metrics
+from .metrics import add_candle_metrics, add_oi_vol_ratio
 from .volume_bars import State, aggregate_volume_candles, is_volume_agg, parse_agg, split_pieces, threshold_units
 
 log = logging.getLogger(__name__)
 
 DAY_MS = 86_400_000
 BASE_AGG = "5m"   # the last day built for this aggregation is the live anchor
+OI_SCHEMA = {"oi_time": pl.Int64, "oi_btc": pl.Float64, "oi_usd": pl.Float64}
+OI_COLS = ["d_oi", "d_oi_usd", "oi_end", "oi_end_usd", "oi_vol_ratio"]
 TRADE_SCHEMA = {"id": pl.Int64, "price": pl.Float64, "qty": pl.Float64, "first_id": pl.Int64,
                 "last_id": pl.Int64, "ts": pl.Int64, "ibm": pl.Boolean, "rep": pl.Boolean}
 DEFAULTS = {
@@ -45,6 +49,7 @@ DEFAULTS = {
     "rest_interval_s": 0.6,     # aggTrades has weight 20; 0.6 s = 2000 of the 2400 weight / minute
     "refresh_s": 1.0,
     "persist_s": 60.0,
+    "oi_interval_s": 60.0,      # openInterestHist poll (new 5-min snapshot appears a few minutes after it)
 }
 
 
@@ -71,6 +76,18 @@ def trades_frame(rows: list[dict]) -> pl.DataFrame:
 
 def _empty_trades() -> pl.DataFrame:
     return pl.DataFrame(schema=TRADE_SCHEMA)
+
+
+def oi_frame(rows: list[dict]) -> pl.DataFrame:
+    """openInterestHist rows (timestamp, sumOpenInterest, sumOpenInterestValue) -> OI snapshots.
+
+    The REST timestamp is already the moment the OI describes: timestamp T equals the metrics row with
+    create_time T - 5 min (docs/pipeline.md), i.e. oi_time = timestamp.
+    """
+    return pl.DataFrame(
+        {"oi_time": [int(r["timestamp"]) for r in rows], "oi_btc": [float(r["sumOpenInterest"]) for r in rows],
+         "oi_usd": [float(r["sumOpenInterestValue"]) for r in rows]},
+        schema=OI_SCHEMA)
 
 
 @dataclass
@@ -156,6 +173,21 @@ class LiveBuilder:
         self.states = {a: anchor.states[a] for a in anchor.aggs if is_volume_agg(a)}
         self.series: dict[str, pl.DataFrame] = {}
         self.fp: dict[str, pl.DataFrame] = {}
+        # OI snapshots: the built ones up to the live start (ΔOI of the first live candle needs the last
+        # snapshot before it), live ones are added by set_oi
+        self.oi_built = load_oi(cfg).select(OI_SCHEMA.keys()).filter(pl.col("oi_time") <= anchor.start_ts).tail(1)
+        self.oi = self.oi_built
+
+    def set_oi(self, live_oi: pl.DataFrame) -> None:
+        """Replace the live OI snapshots and recompute ΔOI / the OI line of all live candles."""
+        self.oi = pl.concat([self.oi_built, live_oi.select(OI_SCHEMA.keys())]).unique("oi_time", keep="last").sort("oi_time")
+        self.series = {a: self._with_oi(c) for a, c in self.series.items()}
+
+    def _with_oi(self, c: pl.DataFrame) -> pl.DataFrame:
+        c = c.drop([k for k in OI_COLS if k in c.columns])
+        if not self.oi.height or not c.height:
+            return c
+        return add_oi_vol_ratio(add_oi_delta(c, self.oi))
 
     @property
     def last_ts(self) -> int | None:
@@ -247,7 +279,7 @@ class LiveBuilder:
         if not cs:
             return
         c = pl.concat(cs, how="diagonal_relaxed").sort("cid")
-        self.series[agg] = self._cvd(agg, c)
+        self.series[agg] = self._with_oi(self._cvd(agg, c))
         self.fp[agg] = pl.concat(fs, how="diagonal_relaxed").sort("cid", "level") if fs else pl.DataFrame()
 
     def _cvd(self, agg: str, c: pl.DataFrame) -> pl.DataFrame:
@@ -286,6 +318,8 @@ class LiveFeed:
         self._persisted_id = 0
         self._last_persist = time.monotonic()
         self._last_rest = 0.0
+        self._last_oi = float("-inf")
+        self._oi = pl.DataFrame(schema=OI_SCHEMA)   # live OI snapshots, kept across re-anchoring
         self._url_idx = 0
         self._received = 0
 
@@ -303,6 +337,8 @@ class LiveFeed:
                 first = runs.filter(pl.col("_g") == 0).drop("_g")   # contiguous prefix; the rest is refetched
                 b.add(first)
         b.refresh()
+        if self._oi.height:
+            b.set_oi(self._oi)
         self._persisted_id = (b.next_id or 0) - 1
         self.builder = b
         self._publish()
@@ -396,6 +432,9 @@ class LiveFeed:
 
     async def _step(self) -> None:
         b = self.builder
+        changed = False
+        if time.monotonic() - self._last_oi > self.lcfg["oi_interval_s"]:
+            changed = await self._poll_oi(b)
         buf, self._ws_buf = self._ws_buf, []
         if b.next_id is not None:
             buf = [d for d in buf if d["a"] >= b.next_id]
@@ -410,10 +449,35 @@ class LiveFeed:
         if buf:
             await asyncio.to_thread(b.add, trades_frame(buf))
             self.status.update(state="live", backfill_from=None)
-        if await asyncio.to_thread(b.refresh):
+        changed = await asyncio.to_thread(b.refresh) or changed
+        if changed:
             self._publish()
         if time.monotonic() - self._last_persist > self.lcfg["persist_s"]:
             await asyncio.to_thread(self._persist)
+
+    async def _poll_oi(self, b: LiveBuilder) -> bool:
+        """Fetch the 5-min OI snapshots since the live start. Errors only log: OI must not stop the trades."""
+        self._last_oi = time.monotonic()
+        rows: list[dict] = []
+        try:
+            while True:   # 500 snapshots = 41 h; page when the live range is longer (late daily update)
+                start = int(rows[-1]["timestamp"]) + 1 if rows else b.anchor.start_ts
+                page = await asyncio.to_thread(self._rest_get, "/futures/data/openInterestHist",
+                                               {"symbol": self.symbol, "period": "5m", "startTime": start, "limit": 500})
+                rows += page
+                if len(page) < 500:
+                    break
+            oi = oi_frame(rows)
+        except Exception as e:
+            log.warning("live: open interest: %s", e)
+            self.status["oi_error"] = str(e)
+            return False
+        self.status["oi_error"] = None
+        if oi.equals(self._oi):
+            return False
+        self._oi = oi
+        await asyncio.to_thread(b.set_oi, oi)
+        return True
 
     async def _rest(self, params: dict) -> list[dict]:
         wait = self._last_rest + self.lcfg["rest_interval_s"] - time.monotonic()
