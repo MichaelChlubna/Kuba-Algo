@@ -27,7 +27,9 @@ RUN useradd --uid 1000 --create-home fp && mkdir -p /data && chown fp /data
 USER fp
 VOLUME /data
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+# probe every 2 s while starting, so the proxy routes to a fresh container within seconds of a
+# redeploy (Coolify routes only healthy containers; with a 30 s first probe the site gave 503)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --start-interval=2s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"
 ENTRYPOINT ["python", "-m", "fp"]
 CMD ["serve"]
