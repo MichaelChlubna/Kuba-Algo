@@ -120,7 +120,7 @@ h1 em { font-style: normal; background: linear-gradient(90deg, var(--sell), var(
 .fp::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: radial-gradient(300px circle at var(--fx, 50%) var(--fy, 0%), var(--spot), transparent 65%); }
 .fp-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 14px; }
 .fp-sym { font-size: 12px; color: var(--muted); }
-.fp-px { font-size: 22px; font-weight: 700; transition: color .3s; }
+.fp-px { font-size: 22px; font-weight: 700; white-space: nowrap; transition: color .3s; }
 .fp-px.up { color: var(--buy); } .fp-px.dn { color: var(--sell); }
 .fp-body { display: grid; grid-template-columns: 58px 10px minmax(0, 1fr) 64px; gap: 0 8px; cursor: crosshair; }
 .lv { display: contents; }

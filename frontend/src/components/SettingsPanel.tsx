@@ -12,7 +12,7 @@ export function SettingsPanel() {
   const colors = s.colors[s.theme];
   const num = (v: string, fallback: number) => (Number.isFinite(+v) && +v > 0 ? +v : fallback);
   return (
-    <div className="flex w-72 flex-col gap-1.5">
+    <div className="flex w-72 max-w-full flex-col gap-1.5">
       <div className="pop-h">{t('colors')} <span className="text-[11px] font-normal text-dim">({s.theme})</span></div>
       <div className="grid grid-cols-2 gap-1.5">
         {COLOR_KEYS.map((k) => (

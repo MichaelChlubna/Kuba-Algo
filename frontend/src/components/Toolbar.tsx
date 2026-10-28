@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ChartEngine } from '../chart/engine';
 import { useT } from '../hooks';
 import { aggLabel, TF_MIN } from '../lib/format';
@@ -6,20 +6,38 @@ import { useSettings, type CellMode, type Layers } from '../store/settings';
 import { useUi } from '../store/ui';
 import { SettingsPanel } from './SettingsPanel';
 
-/** Popover that closes on an outside click. */
+const EDGE = 8; // min gap between a popover and the viewport edge
+
+/** Popover that closes on an outside click. Fixed-positioned and clamped to the viewport,
+ *  so it stays fully on screen wherever the wrapping toolbar puts its button (narrow windows, phones). */
 function Pop({ label, title, active, children, align = 'left' }: { label: ReactNode; title?: string; active?: boolean; children: ReactNode; align?: 'left' | 'right' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<CSSProperties>({ visibility: 'hidden' });
   useEffect(() => {
     if (!open) return;
-    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    const close = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
   }, [open]);
+  useLayoutEffect(() => {
+    if (!open) { setPos({ visibility: 'hidden' }); return; }
+    const place = () => {
+      const b = ref.current!.getBoundingClientRect(), w = pop.current!.offsetWidth;
+      const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+      const want = align === 'right' ? b.right - w : b.left;
+      const top = b.bottom + 4;
+      setPos({ top, left: Math.max(EDGE, Math.min(want, vw - w - EDGE)), maxHeight: Math.max(120, vh - top - EDGE) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open, align]);
   return (
     <span ref={ref} className="relative inline-block">
       <button title={title} className={active ? 'btn-on' : ''} onClick={() => setOpen(!open)}>{label}</button>
-      {open && <div className={`pop ${align === 'right' ? 'right-0' : 'left-0'}`}>{children}</div>}
+      {open && <div ref={pop} className="pop" style={pos}>{children}</div>}
     </span>
   );
 }
