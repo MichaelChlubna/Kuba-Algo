@@ -72,6 +72,7 @@ export class ChartEngine {
   autoY = true;
   selected = -1;
   private hover: { x: number; y: number } | null = null;
+  private hoverMouse = false; // tooltip only for a mouse; on touch the candle detail panel shows the same data
   private range: { from: string; to: string } | null = null;
   private PER = { key: '', map: new Map<string, PeriodRow>(), blocks: new Set<number>(), inflight: new Set<number>() };
   private RVP: { key: string; data: ProfileResponse | null; timer: number | null; inflight: string } = { key: '', data: null, timer: null, inflight: '' };
@@ -1186,7 +1187,7 @@ export class ChartEngine {
       ctx.fillText(fmtPrice(this.priceAt(h.y)), G.plotW + 6, y);
     }
     ctx.setLineDash([]);
-    if (i < 0 || i >= cs.length) { tt.hidden = true; return; }
+    if (i < 0 || i >= cs.length || !this.hoverMouse) { tt.hidden = true; return; }
     const c = cs[i];
     const oi = c.d_oi === null || c.d_oi === undefined ? this.t('no_snapshot')
       : `${c.d_oi >= 0 ? '+' : '−'}${Math.abs(c.d_oi).toFixed(1)} BTC  ${fmtK(c.d_oi_usd)}`;
@@ -1293,6 +1294,7 @@ export class ChartEngine {
         return;
       }
       this.hover = e.pointerType === 'mouse' || this.drag ? p : null;
+      this.hoverMouse = e.pointerType === 'mouse';
       const d = this.drag;
       const area = d ? d.mode : this.hitArea(p.x, p.y);
       el.style.cursor = area === 'price' ? 'ns-resize' : area === 'time' ? 'ew-resize' : d ? 'grabbing' : 'crosshair';
@@ -1358,6 +1360,7 @@ export class ChartEngine {
     }
     if (d && d.moved) this.ensure();
     this.drag = null;
+    if (e.pointerType !== 'mouse' && this.hover) { this.hover = null; this.drawOverlay(); } // no stale crosshair after a touch drag
   };
 }
 

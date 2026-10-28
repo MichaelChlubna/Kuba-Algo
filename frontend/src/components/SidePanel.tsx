@@ -120,8 +120,12 @@ export function SidePanel({ overlay = false }: { overlay?: boolean }) {
   }
 
   return (
-    <aside className="side absolute inset-y-0 right-0 z-20 w-[330px] max-w-[90vw] flex-none overflow-y-auto border-l border-line bg-panel px-3 py-2 shadow-xl lg:static lg:shadow-none">
-      <div className="mb-2 mt-1.5 flex items-center justify-between">
+    <aside className={`side flex-none overflow-y-auto bg-panel px-3 ${overlay
+      ? 'h-[40%] rounded-t-[10px] border-t-2 border-line pb-2 shadow-[0_-6px_16px_rgba(0,0,0,0.35)]'
+      : 'w-[330px] border-l border-line py-2'}`}>
+      {/* narrow screens: the header (with the close button) stays visible while the detail scrolls */}
+      <div className={`mb-2 flex items-center justify-between ${overlay ? 'sticky top-0 z-[1] bg-panel pt-3' : 'mt-1.5'}`}>
+        {overlay && <span className="absolute left-1/2 top-1 h-1 w-9 -translate-x-1/2 rounded-sm bg-line" />}
         <h2 className="text-[13px] uppercase tracking-wider text-dim">{t('candle')}</h2>
         <button className="px-2 py-0 text-dim" title={t('detail_hide')} onClick={close}>×</button>
       </div>
