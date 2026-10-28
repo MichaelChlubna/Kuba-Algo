@@ -25,3 +25,13 @@ export function mergeLive<T extends Keyed>(candles: T[], rows: T[], lastDay: num
   }
   return { appended, replaced };
 }
+
+/**
+ * Copy the detail columns (fetched per candle from /api/candle) from `src` onto `dst`, another row of the
+ * same candle, so a live update of the open candle keeps the loaded detail. Columns the live feed sends
+ * (`liveKeys`) keep their value in `dst`; internal `_` flags are not copied.
+ */
+export function carryDetail(dst: object, src: object, liveKeys: ReadonlySet<string>) {
+  const d = dst as Record<string, unknown>;
+  for (const [k, v] of Object.entries(src)) if (!liveKeys.has(k) && !k.startsWith('_')) d[k] = v;
+}

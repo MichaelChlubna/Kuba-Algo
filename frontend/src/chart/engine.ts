@@ -8,7 +8,7 @@ import type { CandleFootprint, CandleFull, Columnar, FootprintRow, LiveMessage, 
 import { translate, numLocale, type I18nKey } from '../i18n';
 import { aggLabel, fmtDur, fmtK, fmtPrice, fmtTrades, isTimeAgg, TF_MIN } from '../lib/format';
 import { imbalances, percentile, rebin, vwap, type Imbalances } from '../lib/footprint';
-import { mergeLive } from '../lib/live';
+import { carryDetail, mergeLive } from '../lib/live';
 import { DAY, dayNum, fmtTs, isoDay, localInfo, zonedToUtc } from '../lib/time';
 import { useSettings, type Settings } from '../store/settings';
 import { useUi } from '../store/ui';
@@ -21,6 +21,8 @@ const COMPRESS_BELOW = 1.5; // px per candle; below this, candles are merged per
 const PERIOD_BLOCK_DAYS = 7;
 const RANGE_CHUNK_DAYS = 20;
 export const MAX_RANGE_CANDLES = 150_000; // browser memory guard (light columns)
+const DETAIL_REFRESH_MS = 5000; // detail of the selected open candle is refreshed at most this often
+const sameCandle = (a: { cid: number; start_ts: number }, b: { cid: number; start_ts: number }) => a.cid === b.cid && a.start_ts === b.start_ts;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 type Row = CandleFull & { _full?: boolean; _loading?: boolean };
@@ -87,6 +89,8 @@ export class ChartEngine {
   private ws: WebSocket | null = null;
   private wsTimer: number | null = null;
   private liveLayersAt = 0;
+  private liveKeys = new Set<string>(); // candle columns the live feed sends (light columns)
+  private detailAt = 0; // last /api/candle request
 
   constructor(private canvas: HTMLCanvasElement, private overlay: HTMLCanvasElement, private tooltip: HTMLDivElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -428,6 +432,7 @@ export class ChartEngine {
     const st = this.stores.get(m.agg);
     if (!m.candles?.n || !st || st.maxDay === null) return;
     const rows = toRows(m.candles) as Row[];
+    for (const k of Object.keys(m.candles.cols)) this.liveKeys.add(k);
     const current = this.stores.get(this.agg) === st;
     const follow = current && this.rightIdx >= st.candles.length - 1; // the newest candle is in view
     const res = mergeLive(st.candles, rows, st.maxDay, () => st.live === true);
@@ -1262,22 +1267,38 @@ export class ChartEngine {
     const ui = useUi.getState();
     if (i < 0 || i >= cs.length) { if (ui.selected) ui.set({ selected: null }); return; }
     const c = cs[i];
+    const prev = ui.selected;
+    // a live update replaced the open candle by a light row: keep the loaded detail on screen (no
+    // "loading" flash every second) and refresh it in the background now and then
+    if (!c._full && prev?._full && sameCandle(prev, c)) {
+      carryDetail(c, prev, this.liveKeys);
+      c._full = true;
+      if (Date.now() - this.detailAt > DETAIL_REFRESH_MS) void this.loadDetail(c, true);
+    }
     if (ui.selected !== c) ui.set({ selected: c });
     if (!c._full) void this.loadDetail(c);
   }
 
-  private async loadDetail(c: Row) {
+  /** Fetch all columns of a candle; `refresh` overwrites the detail columns of an open (live) candle. */
+  private async loadDetail(c: Row, refresh = false) {
     if (c._loading) return;
     c._loading = true;
+    this.detailAt = Date.now();
     try {
       const row = toRows(await api.candle<CandleFull>(this.agg, c.cid, c.start_ts))[0] ?? {};
-      for (const [k, v] of Object.entries(row)) if (!(k in c) || (c as Record<string, unknown>)[k] === undefined) (c as Record<string, unknown>)[k] = v;
+      const rec = c as Record<string, unknown>;
+      if (refresh) carryDetail(rec, row, this.liveKeys);
+      else for (const [k, v] of Object.entries(row)) if (!(k in c) || rec[k] === undefined) rec[k] = v;
       c._full = true;
     } catch (e) { this.status(this.t('err_detail') + (e as Error).message); }
     finally {
       c._loading = false;
-      const cs = this.store().candles;
-      if (cs[this.selected] === c) useUi.getState().set({ selected: { ...c } as Row });
+      // the live feed may have replaced the candle by a newer row while the request ran
+      const cur = this.store().candles[this.selected];
+      if (cur && sameCandle(cur, c)) {
+        if (cur !== c && c._full) { carryDetail(cur, c, this.liveKeys); cur._full = true; }
+        useUi.getState().set({ selected: { ...cur } as Row });
+      }
     }
   }
 
