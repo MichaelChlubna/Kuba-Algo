@@ -44,9 +44,9 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <Toolbar engine={ready} />
-      <main className="relative flex min-h-0 flex-1">
+      <main className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
         <ChartView onEngine={onEngine} />
-        {/* desktop: docked panel; narrow screens: overlay only while a candle is selected */}
+        {/* desktop: docked on the right; narrow screens: below the chart, only while a candle is selected */}
         {side && (wide || selected) && <SidePanel overlay={!wide} />}
       </main>
     </div>
