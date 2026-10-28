@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeLive } from './live';
+import { carryDetail, mergeLive } from './live';
 
 const D = 86_400_000;
 const c = (cid: number, v = 0) => ({ cid, start_ts: cid, v });
@@ -18,5 +18,13 @@ describe('mergeLive', () => {
     expect(mergeLive(cs, [c(2 * D)], 1, () => false).appended).toBe(0);
     expect(mergeLive(cs, [c(2 * D)], 1, (d) => d === 2).appended).toBe(1);
     expect(cs.length).toBe(3);
+  });
+});
+
+describe('carryDetail', () => {
+  it('keeps the loaded detail on a fresher live row without touching live columns or flags', () => {
+    const live = { cid: 1, close: 101, volume: 7 } as Record<string, unknown>;
+    carryDetail(live, { cid: 1, close: 100, volume: 5, lw_share: 0.3, _full: true, _loading: false }, new Set(['cid', 'close', 'volume']));
+    expect(live).toEqual({ cid: 1, close: 101, volume: 7, lw_share: 0.3 });
   });
 });
