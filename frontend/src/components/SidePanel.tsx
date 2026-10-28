@@ -26,7 +26,10 @@ export function SidePanel({ overlay = false }: { overlay?: boolean }) {
   const agg = useSettings((s) => s.agg);
   const tz = useSettings((s) => s.tz) || meta?.timezone || 'America/New_York';
   const setLayout = useSettings((s) => s.setLayout);
-  const close = () => (overlay ? useUi.getState().set({ selected: null }) : setLayout({ side: false }));
+  const close = () => {
+    useUi.getState().set({ selected: null }); // also deselects the candle in the chart
+    if (!overlay) setLayout({ side: false });
+  };
 
   let body: ReactNode;
   if (!c) body = <span className="text-dim">{t('click_candle')}</span>;
