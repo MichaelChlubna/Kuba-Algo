@@ -97,6 +97,11 @@ export class ChartEngine {
     this.octx = overlay.getContext('2d')!;
     this.applySettings(useSettings.getState(), null);
     this.unsub.push(useSettings.subscribe((s, prev) => this.applySettings(s, prev)));
+    // the detail panel's × clears the selection in the UI store: deselect the candle here too, otherwise
+    // the next live update would publish it (and reopen the panel) again
+    this.unsub.push(useUi.subscribe((s, prev) => {
+      if (!s.selected && prev.selected && this.selected >= 0) { this.selected = -1; this.draw(); }
+    }));
     this.bindInput();
     this.ro = new ResizeObserver(() => this.draw());
     this.ro.observe(canvas.parentElement!);
