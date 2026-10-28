@@ -44,7 +44,7 @@ MAX_FP_ROWS = 400_000     # per request
 CANDLE_COLS = [
     "cid", "start_ts", "end_ts", "first_ts", "last_ts", "duration_ms", "open", "high", "low", "close",
     "volume", "buy", "sell", "volume_usd", "buy_usd", "sell_usd", "delta", "delta_usd", "cvd", "cvd_usd",
-    "trades", "d_oi", "d_oi_usd", "oi_end", "valid", "color", "close_pos", "delta_ratio", "rel_tod",
+    "trades", "d_oi", "d_oi_usd", "oi_end", "oi_end_usd", "valid", "color", "close_pos", "delta_ratio", "rel_tod",
     "lw_vol", "lw_buy", "lw_sell", "lw_vol_usd", "lw_buy_usd", "lw_sell_usd",
     "uw_vol", "uw_buy", "uw_sell", "uw_vol_usd", "uw_buy_usd", "uw_sell_usd",
     "lw_share", "lw_range", "lw_conc", "lw_delta_usd", "lw_delta_ratio", "lw_sell_share",
@@ -56,10 +56,11 @@ POC_COLS = [f"{k}_{b}" for b in (5, 10, 25, 50, 100) for k in ("vpoc", "dpoc_neg
 LIGHT_COLS = [
     "cid", "start_ts", "end_ts", "last_ts", "duration_ms", "open", "high", "low", "close",
     "volume", "volume_usd", "delta", "delta_usd", "cvd_usd", "trades", "d_oi", "d_oi_usd",
+    "oi_end", "oi_end_usd",
 ] + POC_COLS
-_ROUND = {0: ("volume_usd", "delta_usd", "cvd_usd", "d_oi_usd"),
+_ROUND = {0: ("volume_usd", "delta_usd", "cvd_usd", "d_oi_usd", "oi_end_usd"),
           1: ("open", "high", "low", "close"),
-          3: ("volume", "delta", "d_oi")}
+          3: ("volume", "delta", "d_oi", "oi_end")}
 FP_COLS = ["cid", "start_ts", "level", "buy_usd", "sell_usd", "buy", "sell"]
 
 

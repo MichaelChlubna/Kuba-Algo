@@ -1087,7 +1087,8 @@ export class ChartEngine {
     const top = G.oiTop, h = G.oiH, mid = top + h / 2, btc = this.s.oiUnit === 'btc';
     ctx.fillStyle = C.oiBg; ctx.fillRect(0, top, G.plotW, h);
     const get0 = (c: Row) => (btc ? c.d_oi : c.d_oi_usd);
-    let vals: (number | null)[], xs: number[] | null = null;
+    const getOi = (c: Row) => (btc ? c.oi_end : c.oi_end_usd) ?? null;
+    let vals: (number | null)[], ois: (number | null)[], xs: number[] | null = null;
     if (this.compressed()) { // per pixel: sum of ΔOI of the merged candles (null when none has a snapshot)
       const groups = this.pixelGroups(l, r);
       vals = groups.map((g) => {
@@ -1095,14 +1096,24 @@ export class ChartEngine {
         for (let i = g.i0; i <= g.i1; i++) { const v = get0(cs0[i]); if (v !== null && v !== undefined) s = (s || 0) + v; }
         return s;
       });
+      ois = groups.map((g) => getOi(cs0[g.i1])); // OI at the end of the last merged candle
       xs = groups.map((g) => g.px);
-    } else vals = cs0.slice(l, r + 1).map(get0);
+    } else {
+      vals = cs0.slice(l, r + 1).map(get0);
+      ois = cs0.slice(l, r + 1).map(getOi);
+    }
     let m = 0;
     for (const v of vals) if (v !== null && v !== undefined) m = Math.max(m, Math.abs(v));
     ctx.strokeStyle = C.zero; ctx.beginPath(); ctx.moveTo(0, Math.round(mid) + 0.5); ctx.lineTo(G.plotW, Math.round(mid) + 0.5); ctx.stroke();
     ctx.font = `10px ${MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = C.axis;
     ctx.fillText(`ΔOI ${this.s.oiUnit.toUpperCase()}`, G.plotW + 6, top + 8);
-    if (!m) return;
+    if (m) this.drawOiBars(vals, xs, l, m);
+    this.drawOiLine(ois, xs, l);
+  }
+
+  private drawOiBars(vals: (number | null)[], xs: number[] | null, l: number, m: number) {
+    const { ctx, G, C } = this;
+    const top = G.oiTop, h = G.oiH, mid = top + h / 2, btc = this.s.oiUnit === 'btc';
     const fm = btc ? (m >= 1e3 ? fmtK(m, false) : m.toFixed(0)) : fmtK(m, false);
     ctx.fillText('+' + fm, G.plotW + 6, top + 22); ctx.fillText('−' + fm, G.plotW + 6, top + h - 6);
     ctx.save();
@@ -1115,6 +1126,33 @@ export class ChartEngine {
       ctx.fillRect(xs ? xs[k] : this.xOf(l + k) + (this.colW - w) / 2, bh >= 0 ? mid - bh : mid, w, Math.max(1, Math.abs(bh)));
     });
     ctx.restore();
+  }
+
+  /** Open interest itself: a line scaled to the visible min..max of the panel, tag with the last value. */
+  private drawOiLine(ois: (number | null)[], xs: number[] | null, l: number) {
+    const { ctx, G, C } = this;
+    const top = G.oiTop, h = G.oiH;
+    let lo = Infinity, hi = -Infinity, last: number | null = null;
+    for (const v of ois) if (v !== null) { lo = Math.min(lo, v); hi = Math.max(hi, v); last = v; }
+    if (last === null) return;
+    const pad = 6, span = hi - lo || 1;
+    const yOf = (v: number) => top + h - pad - ((v - lo) / span) * (h - 2 * pad);
+    const xc = (k: number) => (xs ? xs[k] + 0.5 : this.xOf(l + k) + this.colW / 2);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, top, G.plotW, h); ctx.clip();
+    ctx.strokeStyle = rgba(C.oiLine, 0.9); ctx.lineWidth = 1.5; ctx.beginPath();
+    let pen = false;
+    ois.forEach((v, k) => {
+      if (v === null) { pen = false; return; }
+      if (pen) ctx.lineTo(xc(k), yOf(v)); else ctx.moveTo(xc(k), yOf(v));
+      pen = true;
+    });
+    ctx.stroke();
+    ctx.restore();
+    const y = Math.min(top + h - 8, Math.max(top + 8, yOf(last)));
+    ctx.fillStyle = rgba(C.oiLine, 0.9); ctx.fillRect(G.plotW + 1, y - 8, G.AX - 1, 16);
+    ctx.fillStyle = C.bg; ctx.font = `10px ${MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('OI ' + (this.s.oiUnit === 'btc' ? (last / 1e3).toFixed(2) + 'K' : fmtK(last, false)), G.plotW + 4, y);
   }
 
   private drawTimeAxis(cs: Row[], l: number, r: number) {
@@ -1195,7 +1233,9 @@ export class ChartEngine {
       `O ${fmtPrice(c.open)}  H ${fmtPrice(c.high)}\nL ${fmtPrice(c.low)}  C ${fmtPrice(c.close)}\n` +
       `Vol    ${fmtK(c.volume_usd, false)}  (${c.volume.toFixed(1)} BTC)\n` +
       `Delta  ${fmtK(c.delta_usd)}  (${c.delta >= 0 ? '+' : '−'}${Math.abs(c.delta).toFixed(1)} BTC)\n` +
-      `Trades ${c.trades.toLocaleString('en-US')}\nDur    ${fmtDur(c.duration_ms)}\nΔOI    ${oi}`;
+      `Trades ${c.trades.toLocaleString('en-US')}\nDur    ${fmtDur(c.duration_ms)}\nΔOI    ${oi}` +
+      (c.oi_end === null || c.oi_end === undefined ? ''
+        : `\nOI     ${Math.round(c.oi_end).toLocaleString('en-US')} BTC  ${fmtK(c.oi_end_usd, false)}`);
     // footprint level under the cursor
     const f = h.y < G.mainH && this.showCells() ? this.fpFor(c, this.bin) : null;
     if (f) {

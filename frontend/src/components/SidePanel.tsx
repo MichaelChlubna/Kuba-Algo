@@ -86,6 +86,7 @@ export function SidePanel({ overlay = false }: { overlay?: boolean }) {
           [t('color_close'), <>{colorTxt} · {fmtNum(n(g('close_pos')), 3)}</>],
           ['Trades', c.trades.toLocaleString('en-US')], ['Duration', fmtDur(c.duration_ms)],
           ['ΔOI', oiTxt],
+          ['OI', n(c.oi_end) === null ? '—' : `${Math.round(c.oi_end!).toLocaleString('en-US')} BTC / ${fmtK(c.oi_end_usd, false)}`],
           [t('rel_tod'), n(g('rel_tod')) === null ? t('short_history_dash') : n(g('rel_tod'))!.toFixed(2) + '×'],
           [zLabel, zTxt],
         ]} />

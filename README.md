@@ -85,8 +85,10 @@ každou sekundu a graf se posouvá za poslední svíčkou. V liště je štítek
 „připojuji“ (oranžový).
 
 - Živé svíčky se počítají stejnými funkcemi jako denní build (test `backend/tests/test_live.py` to porovnává),
-  objemové a tick svíčky navazují na stav posledního postaveného dne. Bez historie zůstávají jen z-score,
-  objem vůči času dne a ΔOI (ty doplní až denní build).
+  objemové a tick svíčky navazují na stav posledního postaveného dne. Bez historie zůstávají jen z-score
+  a objem vůči času dne (ty doplní až denní build).
+- Open interest živých svíček: každou minutu z veřejného REST `/futures/data/openInterestHist` (5min
+  snapshoty, stejné hodnoty jako denní soubory metrics), takže ΔOI a čára OI fungují i pro dnešní den.
 - Po denní aktualizaci (09:30 UTC) se živá data sama přepnou na nově postavený den.
 - Obchody se průběžně ukládají do `data/live/`, takže restart nemusí vše stahovat znovu.
 - Živá data navazují jen na skutečnou historii: dokud updater nepostaví první dny (nebo když jsou ve složce

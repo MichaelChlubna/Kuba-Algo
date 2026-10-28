@@ -14,7 +14,7 @@ from polars.testing import assert_frame_equal
 from fp.build import build, build_day, finalize, build_volume_agg, volume_aggs
 from fp.config import load_config
 from fp.convert import parquet_path
-from fp.live import LiveBuilder, LiveFeed, day_start, find_anchor, live_dir
+from fp.live import LiveBuilder, LiveFeed, day_start, find_anchor, live_dir, oi_frame
 from fp.sample import sample_marker, write_sample
 from fp.server import create_app
 
@@ -51,6 +51,13 @@ def _feed_in_chunks(b: LiveBuilder, trades: pl.DataFrame, seed: int = 1) -> None
         if rnd.random() < 0.7:
             b.refresh()
     b.refresh()
+
+
+def _oi_rest_rows(ref: dict, day: dt.date) -> list[dict]:
+    """The day's metrics snapshots as openInterestHist would return them (timestamp = oi_time)."""
+    m = pl.read_parquet(parquet_path(ref, "metrics", day))
+    return [{"symbol": "BTCUSDT", "sumOpenInterest": str(r["oi_btc"]), "sumOpenInterestValue": str(r["oi_usd"]),
+             "timestamp": r["oi_time"]} for r in m.iter_rows(named=True)]
 
 
 def _cmp(live: pl.DataFrame, ref: pl.DataFrame, key: str) -> None:
@@ -94,6 +101,27 @@ def test_live_candles_equal_batch_build(built):
                            check_dtypes=False, rel_tol=1e-9, abs_tol=1e-6)
 
 
+def test_live_oi_equals_batch_build(built):
+    """ΔOI and the OI line of live candles (REST snapshots) equal the finalized batch build (metrics dump)."""
+    ref, part, day3 = built
+    b = LiveBuilder(part, find_anchor(part))
+    _feed_in_chunks(b, day3.filter(pl.col("ts") < day_start(D3) + 6 * 3_600_000))
+    assert b.series["5m"]["d_oi"].null_count() == b.series["5m"].height   # no live snapshots yet
+    b.set_oi(oi_frame(_oi_rest_rows(ref, D3)))
+    D = ref["paths"]["derived"]
+    for tf in ("1m", "5m", "15m"):
+        live = b.series[tf]
+        rs = pl.read_parquet(D / "series" / tf / f"{D3}.parquet").filter(pl.col("start_ts").is_in(live["start_ts"].implode()))
+        cols = ["start_ts", "d_oi", "d_oi_usd", "oi_end", "oi_end_usd", "oi_vol_ratio"]
+        # the open (last) candle ends later in the batch build: compare the closed ones
+        assert_frame_equal(live.select(cols).sort("start_ts").head(-1), rs.select(cols).sort("start_ts").head(-1),
+                           check_dtypes=False, rel_tol=1e-9, abs_tol=1e-6)
+        assert live["d_oi"].drop_nulls().len() > 0
+    # new trades keep the OI columns
+    _feed_in_chunks(b, day3.filter((pl.col("ts") >= day_start(D3) + 6 * 3_600_000) & (pl.col("ts") < day_start(D3) + 7 * 3_600_000)))
+    assert b.series["5m"]["oi_end"].null_count() == 0
+
+
 def test_gap_is_rejected(built):
     _, part, day3 = built
     b = LiveBuilder(part, find_anchor(part))
@@ -135,7 +163,13 @@ def test_feed_backfills_over_rest_then_follows_websocket(built, tmp_path):
     rows = _rest_rows(head)
     calls = []
 
+    oi_rows = _oi_rest_rows(ref, D3)
+    oi_calls = []
+
     def rest_get(path, params):
+        if path == "/futures/data/openInterestHist":
+            oi_calls.append(params)
+            return [r for r in oi_rows if r["timestamp"] >= params["startTime"]][:params["limit"]]
         calls.append(params)
         i = next(k for k, r in enumerate(rows) if r["a"] >= params["fromId"])
         return rows[i:i + params["limit"]]
@@ -165,6 +199,8 @@ def test_feed_backfills_over_rest_then_follows_websocket(built, tmp_path):
     ref5 = pl.read_parquet(ref["paths"]["derived"] / "candles" / "5m" / f"{D3}.parquet").filter(pl.col("start_ts") < int(b.series["5m"]["start_ts"].max()))
     _cmp(b.series["5m"].filter(pl.col("start_ts") < int(b.series["5m"]["start_ts"].max())), ref5, "start_ts")
     assert any(live_dir(part).glob("*.parquet"))   # persisted for a restart
+    assert oi_calls and oi_calls[0]["startTime"] == day_start(D3)
+    assert b.series["5m"]["d_oi"].drop_nulls().len() > 0   # live candles get ΔOI from the REST snapshots
 
     # restart: the persisted trades are reloaded, nothing to fetch again
     feed2 = LiveFeed(part, rest_get=lambda *a: pytest.fail("no REST expected"))
